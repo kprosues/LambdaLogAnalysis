@@ -111,6 +111,12 @@ class DataProcessor {
     this.data = rawData;
     this.columns = results.meta.fields || [];
     
+    // If columns array is empty but we have data, extract columns from first row
+    if (this.columns.length === 0 && this.data.length > 0 && this.data[0]) {
+      this.columns = Object.keys(this.data[0]);
+      console.log('Columns extracted from data row keys:', this.columns);
+    }
+    
     // Debug: Log column names
     console.log('CSV Columns detected:', this.columns);
     console.log('Raw data rows:', this.data.length);

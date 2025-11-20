@@ -34,89 +34,180 @@
     </div>
 
     <div id="contentArea" class="content-area" style="display: none;">
-      <!-- Statistics Panel -->
-      <section class="statistics-panel">
-        <h2>Summary Statistics</h2>
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-label">Total Knock Events</div>
-            <div class="stat-value" id="totalKnockEvents">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Max Knock Retard</div>
-            <div class="stat-value" id="maxKnockRetard">0.0°</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Time with Knock</div>
-            <div class="stat-value" id="timeWithKnock">0.0%</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Severe Events</div>
-            <div class="stat-value" id="severeEvents">0</div>
-          </div>
-        </div>
-      </section>
+      <!-- Tab Navigation -->
+      <div class="tabs-container">
+        <button class="tab-btn active" data-tab="knock">Knock Analysis</button>
+        <button class="tab-btn" data-tab="boost">Boost Control</button>
+      </div>
 
-      <!-- Charts Section -->
-      <section class="charts-section">
-        <h2>Analysis Charts</h2>
-        <div class="charts-container">
-          <div class="chart-wrapper">
-            <div class="chart-header">
-              <h3>Knock Retard Over Time</h3>
+      <!-- Knock Analysis Tab -->
+      <div class="tab-content active" data-tab="knock">
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Total Knock Events</div>
+              <div class="stat-value" id="knock-totalKnockEvents">0</div>
             </div>
-            <canvas id="knockChart"></canvas>
-          </div>
-          <div class="chart-wrapper">
-            <div class="chart-header">
-              <h3>Engine Speed vs Knock Events</h3>
+            <div class="stat-card">
+              <div class="stat-label">Max Knock Retard</div>
+              <div class="stat-value" id="knock-maxKnockRetard">0.0°</div>
             </div>
-            <canvas id="rpmChart"></canvas>
-          </div>
-          <div class="chart-wrapper">
-            <div class="chart-header">
-              <h3>Throttle Position vs Knock Events</h3>
+            <div class="stat-card">
+              <div class="stat-label">Time with Knock</div>
+              <div class="stat-value" id="knock-timeWithKnock">0.0%</div>
             </div>
-            <canvas id="throttleChart"></canvas>
-          </div>
-          <div class="chart-wrapper">
-            <div class="chart-header">
-              <h3>Air/Fuel Ratio During Knock Events</h3>
+            <div class="stat-card">
+              <div class="stat-label">Severe Events</div>
+              <div class="stat-value" id="knock-severeEvents">0</div>
             </div>
-            <canvas id="afrChart"></canvas>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- Anomaly Table -->
-      <section class="anomaly-section">
-        <h2>Knock Events Detail</h2>
-        <div class="table-controls">
-          <input type="text" id="searchInput" placeholder="Search..." class="search-input">
-          <select id="severityFilter" class="filter-select">
-            <option value="all">All Severities</option>
-            <option value="mild">Mild</option>
-            <option value="severe">Severe</option>
-          </select>
-        </div>
-        <div class="table-container">
-          <table id="anomalyTable" class="anomaly-table">
-            <thead>
-              <tr>
-                <th data-sort="time">Time (s) ↕</th>
-                <th data-sort="knockRetard">Knock Retard (°) ↕</th>
-                <th data-sort="rpm">RPM ↕</th>
-                <th data-sort="throttle">Throttle (%) ↕</th>
-                <th data-sort="load">Load (g/rev) ↕</th>
-                <th data-sort="afr">A/F Ratio (λ) ↕</th>
-                <th data-sort="severity">Severity ↕</th>
-              </tr>
-            </thead>
-            <tbody id="anomalyTableBody">
-            </tbody>
-          </table>
-        </div>
-      </section>
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <h2>Analysis Charts</h2>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Knock Retard Over Time</h3>
+              </div>
+              <canvas id="knock-knockChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Engine Speed vs Knock Events</h3>
+              </div>
+              <canvas id="knock-rpmChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Throttle Position vs Knock Events</h3>
+              </div>
+              <canvas id="knock-throttleChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Air/Fuel Ratio During Knock Events</h3>
+              </div>
+              <canvas id="knock-afrChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- Anomaly Table -->
+        <section class="anomaly-section">
+          <h2>Knock Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="knock-searchInput" placeholder="Search..." class="search-input">
+            <select id="knock-severityFilter" class="filter-select">
+              <option value="all">All Severities</option>
+              <option value="mild">Mild</option>
+              <option value="severe">Severe</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="knock-anomalyTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="knockRetard">Knock Retard (°) ↕</th>
+                  <th data-sort="rpm">RPM ↕</th>
+                  <th data-sort="throttle">Throttle (%) ↕</th>
+                  <th data-sort="load">Load (g/rev) ↕</th>
+                  <th data-sort="afr">A/F Ratio (λ) ↕</th>
+                  <th data-sort="severity">Severity ↕</th>
+                </tr>
+              </thead>
+              <tbody id="knock-anomalyTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Boost Control Tab -->
+      <div class="tab-content" data-tab="boost">
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Max Overshoot</div>
+              <div class="stat-value" id="boost-maxOvershoot">0.0 kPa</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Time in Target</div>
+              <div class="stat-value" id="boost-inTargetPercent">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Overshoot Events</div>
+              <div class="stat-value" id="boost-overshootEvents">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Undershoot Events</div>
+              <div class="stat-value" id="boost-undershootEvents">0</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <h2>Analysis Charts</h2>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Boost Target vs Actual</h3>
+              </div>
+              <canvas id="boost-boostTargetChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Boost Error Over Time</h3>
+              </div>
+              <canvas id="boost-boostErrorChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Wastegate Duty Cycle</h3>
+              </div>
+              <canvas id="boost-wastegateChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- Boost Events Table -->
+        <section class="anomaly-section">
+          <h2>Boost Control Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="boost-searchInput" placeholder="Search..." class="search-input">
+            <select id="boost-eventTypeFilter" class="filter-select">
+              <option value="all">All Event Types</option>
+              <option value="overshoot">Overshoot</option>
+              <option value="undershoot">Undershoot</option>
+              <option value="normal">Normal</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="boost-boostTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="boostTarget">Boost Target (kPa) ↕</th>
+                  <th data-sort="actualBoost">Actual Boost (kPa) ↕</th>
+                  <th data-sort="boostError">Error (kPa) ↕</th>
+                  <th data-sort="boostErrorPercent">Error (%) ↕</th>
+                  <th data-sort="wastegateDC">Wastegate DC (%) ↕</th>
+                  <th data-sort="eventType">Event Type ↕</th>
+                </tr>
+              </thead>
+              <tbody id="boost-boostTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div id="loadingIndicator" class="loading" style="display: none;">
@@ -141,6 +232,10 @@
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="../analysis/dataProcessor.js"></script>
   <script src="../analysis/knockDetector.js"></script>
+  <script src="../analysis/boostControlAnalyzer.js"></script>
+  <script src="tabManager.js"></script>
+  <script src="tabs/knockAnalysisTab.js"></script>
+  <script src="tabs/boostControlTab.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

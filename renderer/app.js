@@ -1,9 +1,9 @@
 // Analysis modules are loaded via script tags in index.html
 let dataProcessor = null;
-let knockDetector = null;
-let charts = {};
-let currentSort = { column: null, direction: 'asc' };
-let chartOriginalRanges = {}; // Store original min/max for each chart
+let tabManager = null;
+
+// Make dataProcessor globally accessible for tab modules
+window.dataProcessor = null;
 
 // DOM Elements
 const openFileBtn = document.getElementById('openFileBtn');
@@ -17,17 +17,6 @@ const progressBar = document.getElementById('progressBar');
 const loadingStatus = document.getElementById('loadingStatus');
 const fileName = document.getElementById('fileName');
 
-// Statistics elements
-const totalKnockEvents = document.getElementById('totalKnockEvents');
-const maxKnockRetard = document.getElementById('maxKnockRetard');
-const timeWithKnock = document.getElementById('timeWithKnock');
-const severeEvents = document.getElementById('severeEvents');
-
-// Table elements
-const anomalyTableBody = document.getElementById('anomalyTableBody');
-const searchInput = document.getElementById('searchInput');
-const severityFilter = document.getElementById('severityFilter');
-
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   // Ensure all DOM elements are available
@@ -36,7 +25,20 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
   
+  // Initialize TabManager
+  tabManager = new TabManager();
+  
+  // Register tabs
+  const knockDetector = new KnockDetector(null); // Will be set when data is loaded
+  const boostAnalyzer = new BoostControlAnalyzer(null); // Will be set when data is loaded
+  
+  tabManager.registerTab('knock', KnockAnalysisTab, knockDetector);
+  tabManager.registerTab('boost', BoostControlTab, boostAnalyzer);
+  
   setupEventListeners();
+  
+  // Set default active tab
+  tabManager.switchTab('knock');
 });
 
 function setupEventListeners() {
@@ -75,14 +77,35 @@ function setupEventListeners() {
     });
   }
   
-  // Table sorting
-  document.querySelectorAll('#anomalyTable th[data-sort]').forEach(th => {
-    th.addEventListener('click', () => handleSort(th.dataset.sort));
-  });
-  
-  // Search and filter
-  searchInput.addEventListener('input', updateTable);
-  severityFilter.addEventListener('change', updateTable);
+  // Tab button clicks - use event delegation on contentArea to ensure it always works
+  if (contentArea) {
+    contentArea.addEventListener('click', (e) => {
+      const tabBtn = e.target.closest('.tab-btn');
+      if (tabBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const tabId = tabBtn.dataset.tab;
+        if (tabId && tabManager) {
+          console.log('Switching to tab:', tabId);
+          tabManager.switchTab(tabId);
+        } else {
+          console.warn('Tab switch failed:', { tabId, hasTabManager: !!tabManager });
+        }
+      }
+    });
+  } else {
+    // Fallback: direct listeners if contentArea doesn't exist yet
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const tabId = btn.dataset.tab;
+        if (tabId && tabManager) {
+          console.log('Switching to tab:', tabId);
+          tabManager.switchTab(tabId);
+        }
+      });
+    });
+  }
 }
 
 async function handleOpenFile() {
@@ -163,6 +186,8 @@ async function processFile(content, filePath) {
     console.log('Starting CSV parse...');
     updateProgress(10, 'Parsing CSV file...');
     dataProcessor = new DataProcessor();
+    // Make globally accessible
+    window.dataProcessor = dataProcessor;
     
     // Create progress callback that safely handles errors
     const progressCallback = (progress) => {
@@ -186,28 +211,60 @@ async function processFile(content, filePath) {
     console.log('Parsed columns:', dataProcessor.getColumns());
     console.log('Total rows:', parseResult.rowCount);
     
-    // Step 2: Detect knock events (30% of progress)
-    updateProgress(45, 'Detecting knock events...');
+    // Step 2: Initialize analyzers and run analysis (30% of progress)
+    updateProgress(45, 'Analyzing data...');
     
-    // Check if knock retard column exists
-    const columns = dataProcessor.getColumns();
-    const hasKnockColumn = columns.some(col => 
-      col.toLowerCase().includes('knock') && 
-      col.toLowerCase().includes('retard')
-    );
-    console.log('Knock retard column found:', hasKnockColumn);
+    // Clear tab cache
+    tabManager.clearCache();
     
-    // Sample a few rows to check knock retard values
-    const sampleData = dataProcessor.getData().slice(0, 10);
-    console.log('Sample knock retard values:', 
-      sampleData.map(row => row['Knock Retard (°)'] || row['Knock Retard'] || 'N/A')
-    );
+    // Update analyzers with data processor
+    const knockDetector = tabManager.getTabAnalyzer('knock');
+    const boostAnalyzer = tabManager.getTabAnalyzer('boost');
     
-    knockDetector = new KnockDetector(dataProcessor);
-    const events = knockDetector.detectKnockEvents();
+    console.log('Setting dataProcessor on analyzers...');
+    console.log('dataProcessor:', dataProcessor);
+    console.log('dataProcessor columns:', dataProcessor ? dataProcessor.getColumns() : 'N/A');
     
-    updateProgress(70, `Found ${events.length} knock events`);
-    console.log('Detected knock events:', events.length);
+    if (knockDetector) {
+      knockDetector.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on knockDetector');
+    }
+    if (boostAnalyzer) {
+      boostAnalyzer.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on boostAnalyzer');
+      console.log('boostAnalyzer.dataProcessor:', boostAnalyzer.dataProcessor);
+      console.log('boostAnalyzer.dataProcessor columns:', boostAnalyzer.dataProcessor ? boostAnalyzer.dataProcessor.getColumns() : 'N/A');
+    }
+    
+    // Run knock analysis
+    updateProgress(50, 'Detecting knock events...');
+    if (knockDetector) {
+      const knockEvents = knockDetector.detectKnockEvents();
+      console.log('Detected knock events:', knockEvents.length);
+      tabManager.cache.set('knock', { events: knockEvents });
+    }
+    
+    // Run boost control analysis
+    updateProgress(60, 'Analyzing boost control...');
+    if (boostAnalyzer) {
+      const boostAnalysis = boostAnalyzer.analyze();
+      console.log('Boost analysis complete:', boostAnalysis ? 'success' : 'failed');
+      if (boostAnalysis) {
+        console.log('Boost analysis results:', {
+          events: boostAnalysis.events?.length || 0,
+          hasStats: !!boostAnalysis.statistics,
+          hasColumns: !!boostAnalysis.columns,
+          error: boostAnalysis.error
+        });
+        tabManager.cache.set('boost', boostAnalysis);
+      } else {
+        console.error('Boost analysis returned null');
+      }
+    } else {
+      console.error('Boost analyzer not available');
+    }
+    
+    updateProgress(70, 'Analysis complete');
     
     // Step 3: Update UI (10% of progress)
     console.log('Updating UI...');
@@ -223,23 +280,14 @@ async function processFile(content, filePath) {
       resetZoomBtn.style.display = 'inline-block';
     }
     
-    // Step 4: Update statistics (5% of progress)
-    console.log('Updating statistics...');
-    updateProgress(80, 'Calculating statistics...');
+    // Step 4: Render active tab (15% of progress)
+    console.log('Rendering active tab...');
+    updateProgress(80, 'Rendering charts and statistics...');
     await new Promise(resolve => setTimeout(resolve, 10));
-    updateStatistics();
     
-    // Step 5: Render charts (10% of progress)
-    console.log('Rendering charts...');
-    updateProgress(85, 'Rendering charts...');
-    await new Promise(resolve => setTimeout(resolve, 10));
-    renderCharts();
-    
-    // Step 6: Update table (5% of progress)
-    console.log('Updating table...');
-    updateProgress(95, 'Updating anomaly table...');
-    await new Promise(resolve => setTimeout(resolve, 10));
-    updateTable();
+    // Render the active tab (default is 'knock')
+    const activeTabId = tabManager.getActiveTab() || 'knock';
+    tabManager.switchTab(activeTabId);
     
     // Complete
     console.log('File processing complete!');
@@ -260,405 +308,32 @@ async function processFile(content, filePath) {
   }
 }
 
+// These functions are now handled by tab modules
+// Keeping for backward compatibility but they should not be called directly
 function updateStatistics() {
-  const stats = knockDetector.getStatistics();
-  
-  totalKnockEvents.textContent = stats.totalEvents.toLocaleString();
-  // Display absolute value since knock retard is negative
-  maxKnockRetard.textContent = Math.abs(stats.maxKnockRetard).toFixed(2) + '°';
-  timeWithKnock.textContent = stats.timeWithKnock.toFixed(2) + '%';
-  severeEvents.textContent = stats.severeEvents;
+  const activeTabId = tabManager.getActiveTab();
+  const tab = tabManager.tabs.get(activeTabId);
+  if (tab && tab.module && tab.module.updateStatistics) {
+    tab.module.updateStatistics();
+  }
 }
 
 function renderCharts() {
-  const data = dataProcessor.getData();
-  const events = knockDetector.getKnockEvents();
-  
-  if (!data || data.length === 0) return;
-  
-  // Prepare data
-  const times = data.map(row => row['Time (s)']);
-  const knockRetards = data.map(row => {
-    const val = row['Knock Retard (°)'] || 0;
-    // Convert to absolute value for display (knock retard is negative)
-    return val < 0 ? Math.abs(val) : 0;
-  });
-  const rpms = data.map(row => row['Engine Speed (rpm)'] || 0);
-  const throttles = data.map(row => row['Throttle Position (%)'] || 0);
-  const afrs = data.map(row => row['Air/Fuel Sensor #1 (λ)'] || 0);
-  
-  // Create knock event point arrays (aligned with time indices)
-  const createKnockPointArray = (events, dataArray, valueExtractor) => {
-    const pointArray = new Array(times.length).fill(NaN);
-    events.forEach(event => {
-      // Find closest time index
-      let closestIdx = 0;
-      let minDiff = Math.abs(times[0] - event.time);
-      for (let i = 1; i < times.length; i++) {
-        const diff = Math.abs(times[i] - event.time);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestIdx = i;
-        }
-      }
-      // Use absolute value for knock retard display
-      const value = valueExtractor(event);
-      pointArray[closestIdx] = typeof value === 'number' && value < 0 ? Math.abs(value) : value;
-    });
-    return pointArray;
-  };
-  
-  const knockRpmPoints = createKnockPointArray(events, rpms, e => e.rpm);
-  const knockThrottlePoints = createKnockPointArray(events, throttles, e => e.throttle);
-  const knockAfrPoints = createKnockPointArray(events, afrs, e => e.afr);
-  
-  // Separate events by severity for knock chart
-  const severeEvents = events.filter(e => e.severity === 'severe');
-  const mildEvents = events.filter(e => e.severity === 'mild');
-  
-  const createSeverityPointArray = (eventList) => {
-    const pointArray = new Array(times.length).fill(NaN);
-    eventList.forEach(event => {
-      let closestIdx = 0;
-      let minDiff = Math.abs(times[0] - event.time);
-      for (let i = 1; i < times.length; i++) {
-        const diff = Math.abs(times[i] - event.time);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestIdx = i;
-        }
-      }
-      // Use absolute value for display (knock retard is negative)
-      pointArray[closestIdx] = Math.abs(event.knockRetard);
-    });
-    return pointArray;
-  };
-  
-  const severeKnockPoints = createSeverityPointArray(severeEvents);
-  const mildKnockPoints = createSeverityPointArray(mildEvents);
-  
-  // Chart configuration with zoom
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        display: true,
-        position: 'top'
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false
-      },
-      zoom: {
-        zoom: {
-          wheel: {
-            enabled: true,
-            modifierKey: 'ctrl'
-          },
-          pinch: {
-            enabled: true
-          },
-          drag: {
-            enabled: true,
-            modifierKey: null, // No modifier key needed - just click and drag
-            backgroundColor: 'rgba(0, 0, 0, 0.1)',
-            borderColor: 'rgba(0, 0, 0, 0.3)',
-            borderWidth: 1
-          },
-          mode: 'x',
-          onZoomComplete: (ctx) => {
-            // Synchronize zoom across all charts
-            synchronizeChartZoom(ctx.chart);
-          }
-        },
-        pan: {
-          enabled: true,
-          mode: 'x',
-          modifierKey: 'shift',
-          onPanComplete: (ctx) => {
-            // Synchronize pan across all charts
-            synchronizeChartZoom(ctx.chart);
-          }
-        }
-      }
-    },
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: 'Time (s)'
-        },
-        type: 'linear'
-      }
-    },
-    interaction: {
-      mode: 'index',
-      intersect: false
-    }
-  };
-  
-  // Knock Retard Chart
-  if (charts.knock) charts.knock.destroy();
-  
-  const knockDatasets = [{
-    label: 'Knock Retard (°)',
-    data: knockRetards,
-    borderColor: 'rgb(220, 53, 69)',
-    backgroundColor: 'rgba(220, 53, 69, 0.1)',
-    borderWidth: 2,
-    pointRadius: 0,
-    pointHoverRadius: 4
-  }];
-  
-  // Add severity-specific point datasets
-  if (severeEvents.length > 0) {
-    knockDatasets.push({
-      label: 'Severe Knock',
-      data: severeKnockPoints,
-      borderColor: 'rgb(220, 53, 69)',
-      backgroundColor: 'rgba(220, 53, 69, 0.8)',
-      borderWidth: 0,
-      pointRadius: 6,
-      pointHoverRadius: 8,
-      showLine: false,
-      spanGaps: false
-    });
-  }
-  
-  if (mildEvents.length > 0) {
-    knockDatasets.push({
-      label: 'Mild Knock',
-      data: mildKnockPoints,
-      borderColor: 'rgb(255, 193, 7)',
-      backgroundColor: 'rgba(255, 193, 7, 0.8)',
-      borderWidth: 0,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      showLine: false,
-      spanGaps: false
-    });
-  }
-  
-  charts.knock = new Chart(document.getElementById('knockChart'), {
-    type: 'line',
-    data: {
-      labels: times,
-      datasets: knockDatasets
-    },
-    options: chartOptions
-  });
-  
-  // Store original range for synchronization
-  if (times.length > 0) {
-    chartOriginalRanges.knock = {
-      min: parseFloat(times[0]),
-      max: parseFloat(times[times.length - 1])
-    };
-  }
-  
-  // RPM vs Knock Chart
-  if (charts.rpm) charts.rpm.destroy();
-  charts.rpm = new Chart(document.getElementById('rpmChart'), {
-    type: 'line',
-    data: {
-      labels: times,
-      datasets: [
-        {
-          label: 'Engine Speed (RPM)',
-          data: rpms,
-          borderColor: 'rgb(40, 167, 69)',
-          backgroundColor: 'rgba(40, 167, 69, 0.1)',
-          borderWidth: 2,
-          pointRadius: 0
-        },
-        {
-          label: 'Knock Events',
-          data: knockRpmPoints,
-          borderColor: 'rgb(220, 53, 69)',
-          backgroundColor: 'rgba(220, 53, 69, 0.5)',
-          borderWidth: 0,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          showLine: false,
-          spanGaps: false
-        }
-      ]
-    },
-    options: chartOptions
-  });
-  
-  // Store original range
-  if (times.length > 0) {
-    chartOriginalRanges.rpm = {
-      min: parseFloat(times[0]),
-      max: parseFloat(times[times.length - 1])
-    };
-  }
-  
-  // Throttle vs Knock Chart
-  if (charts.throttle) charts.throttle.destroy();
-  charts.throttle = new Chart(document.getElementById('throttleChart'), {
-    type: 'line',
-    data: {
-      labels: times,
-      datasets: [
-        {
-          label: 'Throttle Position (%)',
-          data: throttles,
-          borderColor: 'rgb(0, 123, 255)',
-          backgroundColor: 'rgba(0, 123, 255, 0.1)',
-          borderWidth: 2,
-          pointRadius: 0
-        },
-        {
-          label: 'Knock Events',
-          data: knockThrottlePoints,
-          borderColor: 'rgb(220, 53, 69)',
-          backgroundColor: 'rgba(220, 53, 69, 0.6)',
-          borderWidth: 0,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          showLine: false,
-          spanGaps: false
-        }
-      ]
-    },
-    options: chartOptions
-  });
-  
-  // Store original range
-  if (times.length > 0) {
-    chartOriginalRanges.throttle = {
-      min: parseFloat(times[0]),
-      max: parseFloat(times[times.length - 1])
-    };
-  }
-  
-  // AFR vs Knock Chart
-  if (charts.afr) charts.afr.destroy();
-  charts.afr = new Chart(document.getElementById('afrChart'), {
-    type: 'line',
-    data: {
-      labels: times,
-      datasets: [
-        {
-          label: 'Air/Fuel Ratio (λ)',
-          data: afrs,
-          borderColor: 'rgb(255, 193, 7)',
-          backgroundColor: 'rgba(255, 193, 7, 0.1)',
-          borderWidth: 2,
-          pointRadius: 0
-        },
-        {
-          label: 'Knock Events',
-          data: knockAfrPoints,
-          borderColor: 'rgb(220, 53, 69)',
-          backgroundColor: 'rgba(220, 53, 69, 0.6)',
-          borderWidth: 0,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          showLine: false,
-          spanGaps: false
-        }
-      ]
-    },
-    options: chartOptions
-  });
-  
-  // Store original range
-  if (times.length > 0) {
-    chartOriginalRanges.afr = {
-      min: parseFloat(times[0]),
-      max: parseFloat(times[times.length - 1])
-    };
+  const activeTabId = tabManager.getActiveTab();
+  const tab = tabManager.tabs.get(activeTabId);
+  if (tab && tab.module && tab.module.renderCharts) {
+    tab.module.renderCharts();
   }
 }
 
 function updateTable() {
-  if (!knockDetector) return;
-  
-  const searchTerm = searchInput.value;
-  const severity = severityFilter.value;
-  const filteredEvents = knockDetector.filterEvents(searchTerm, severity);
-  
-  // Sort if needed
-  let sortedEvents = [...filteredEvents];
-  if (currentSort.column) {
-    sortedEvents.sort((a, b) => {
-      let aVal = a[currentSort.column];
-      let bVal = b[currentSort.column];
-      
-      if (typeof aVal === 'string') {
-        aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
-      }
-      
-      if (currentSort.direction === 'asc') {
-        return aVal > bVal ? 1 : -1;
-      } else {
-        return aVal < bVal ? 1 : -1;
-      }
-    });
+  const activeTabId = tabManager.getActiveTab();
+  const tab = tabManager.tabs.get(activeTabId);
+  if (tab && tab.module && tab.module.updateTable) {
+    tab.module.updateTable();
   }
-  
-  // Clear table
-  anomalyTableBody.innerHTML = '';
-  
-  // Populate table
-  sortedEvents.forEach(event => {
-    const row = document.createElement('tr');
-    // Show duration if this is a grouped event
-    const timeDisplay = event.duration !== undefined 
-      ? `${event.time.toFixed(3)} (${(event.duration * 1000).toFixed(0)}ms)`
-      : event.time.toFixed(3);
-    
-    row.innerHTML = `
-      <td>${timeDisplay}</td>
-      <td>${Math.abs(event.knockRetard).toFixed(2)}</td>
-      <td>${Math.round(event.rpm)}</td>
-      <td>${event.throttle.toFixed(1)}</td>
-      <td>${event.load.toFixed(2)}</td>
-      <td>${event.afr.toFixed(3)}</td>
-      <td><span class="severity-badge severity-${event.severity}">${event.severity}</span></td>
-    `;
-    anomalyTableBody.appendChild(row);
-  });
 }
 
-function handleSort(column) {
-  // Map column names
-  const columnMap = {
-    'time': 'time',
-    'knockRetard': 'knockRetard',
-    'rpm': 'rpm',
-    'throttle': 'throttle',
-    'load': 'load',
-    'afr': 'afr',
-    'severity': 'severity'
-  };
-  
-  const mappedColumn = columnMap[column];
-  if (!mappedColumn) return;
-  
-  // Toggle sort direction
-  if (currentSort.column === mappedColumn) {
-    currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-  } else {
-    currentSort.column = mappedColumn;
-    currentSort.direction = 'asc';
-  }
-  
-  // Update header indicators
-  document.querySelectorAll('#anomalyTable th').forEach(th => {
-    th.textContent = th.textContent.replace(' ↑', '').replace(' ↓', '');
-    if (th.dataset.sort === column) {
-      th.textContent += currentSort.direction === 'asc' ? ' ↑' : ' ↓';
-    }
-  });
-  
-  updateTable();
-}
 
 function showLoading(show) {
   // Show/hide the modal spinner (for initial loading state)
@@ -711,6 +386,21 @@ function updateProgress(percent, text) {
 function resetChartZoom() {
   console.log('resetChartZoom called');
   
+  const activeTabId = tabManager.getActiveTab();
+  if (!activeTabId) {
+    console.warn('No active tab');
+    return;
+  }
+  
+  const tab = tabManager.tabs.get(activeTabId);
+  if (!tab || !tab.module) {
+    console.warn('Active tab module not found');
+    return;
+  }
+  
+  const charts = tab.module.charts || {};
+  const chartOriginalRanges = tab.module.chartOriginalRanges || {};
+  
   // Check if charts exist
   if (!charts || Object.keys(charts).length === 0) {
     console.warn('No charts available to reset');
@@ -732,7 +422,6 @@ function resetChartZoom() {
     }
     
     // Always use manual reset to ensure consistent behavior
-    // The zoom plugin's resetZoom() can have state issues after first use
     resetChartManually(chart, originalRange);
   });
 }
@@ -804,6 +493,19 @@ function synchronizeChartZoom(sourceChart) {
   const min = sourceScale.min;
   const max = sourceScale.max;
   
+  const activeTabId = tabManager.getActiveTab();
+  if (!activeTabId) {
+    return;
+  }
+  
+  const tab = tabManager.tabs.get(activeTabId);
+  if (!tab || !tab.module) {
+    return;
+  }
+  
+  const charts = tab.module.charts || {};
+  const chartOriginalRanges = tab.module.chartOriginalRanges || {};
+  
   // Find which chart this is
   let sourceChartKey = null;
   Object.keys(charts).forEach(key => {
@@ -824,7 +526,7 @@ function synchronizeChartZoom(sourceChart) {
   // Check if we're at full zoom (within 1% tolerance)
   const isFullZoom = Math.abs(currentRange - originalRange) / originalRange < 0.01;
   
-  // Apply the same zoom to all other charts
+  // Apply the same zoom to all other charts in this tab
   Object.keys(charts).forEach(key => {
     if (charts[key] && charts[key] !== sourceChart) {
       const targetChart = charts[key];
@@ -847,8 +549,11 @@ function synchronizeChartZoom(sourceChart) {
           const targetMin = targetOriginal.min + (sourceRelativeMin * (targetOriginal.max - targetOriginal.min));
           const targetMax = targetOriginal.min + (sourceRelativeMax * (targetOriginal.max - targetOriginal.min));
           
-          targetChart.options.scales.x.min = targetMin;
-          targetChart.options.scales.x.max = targetMax;
+          // Apply zoom
+          if (targetChart.options?.scales?.x) {
+            targetChart.options.scales.x.min = targetMin;
+            targetChart.options.scales.x.max = targetMax;
+          }
           targetChart.update('none');
         }
       }
