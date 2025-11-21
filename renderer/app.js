@@ -31,9 +31,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Register tabs
   const knockDetector = new KnockDetector(null); // Will be set when data is loaded
   const boostAnalyzer = new BoostControlAnalyzer(null); // Will be set when data is loaded
+  const afrAnalyzer = new AFRAnalyzer(null); // Will be set when data is loaded
   
   tabManager.registerTab('knock', KnockAnalysisTab, knockDetector);
   tabManager.registerTab('boost', BoostControlTab, boostAnalyzer);
+  tabManager.registerTab('afr', AFRAnalysisTab, afrAnalyzer);
   
   setupEventListeners();
   
@@ -220,6 +222,7 @@ async function processFile(content, filePath) {
     // Update analyzers with data processor
     const knockDetector = tabManager.getTabAnalyzer('knock');
     const boostAnalyzer = tabManager.getTabAnalyzer('boost');
+    const afrAnalyzer = tabManager.getTabAnalyzer('afr');
     
     console.log('Setting dataProcessor on analyzers...');
     console.log('dataProcessor:', dataProcessor);
@@ -234,6 +237,10 @@ async function processFile(content, filePath) {
       console.log('✓ Set dataProcessor on boostAnalyzer');
       console.log('boostAnalyzer.dataProcessor:', boostAnalyzer.dataProcessor);
       console.log('boostAnalyzer.dataProcessor columns:', boostAnalyzer.dataProcessor ? boostAnalyzer.dataProcessor.getColumns() : 'N/A');
+    }
+    if (afrAnalyzer) {
+      afrAnalyzer.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on afrAnalyzer');
     }
     
     // Run knock analysis
@@ -262,6 +269,26 @@ async function processFile(content, filePath) {
       }
     } else {
       console.error('Boost analyzer not available');
+    }
+    
+    // Run AFR analysis
+    updateProgress(65, 'Analyzing air/fuel ratio...');
+    if (afrAnalyzer) {
+      const afrAnalysis = afrAnalyzer.analyze();
+      console.log('AFR analysis complete:', afrAnalysis ? 'success' : 'failed');
+      if (afrAnalysis) {
+        console.log('AFR analysis results:', {
+          events: afrAnalysis.events?.length || 0,
+          hasStats: !!afrAnalysis.statistics,
+          hasColumns: !!afrAnalysis.columns,
+          error: afrAnalysis.error
+        });
+        tabManager.cache.set('afr', afrAnalysis);
+      } else {
+        console.error('AFR analysis returned null');
+      }
+    } else {
+      console.error('AFR analyzer not available');
     }
     
     updateProgress(70, 'Analysis complete');
