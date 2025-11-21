@@ -38,6 +38,7 @@
       <div class="tabs-container">
         <button class="tab-btn active" data-tab="knock">Knock Analysis</button>
         <button class="tab-btn" data-tab="boost">Boost Control</button>
+        <button class="tab-btn" data-tab="afr">Air/Fuel Ratio</button>
       </div>
 
       <!-- Knock Analysis Tab -->
@@ -208,6 +209,93 @@
           </div>
         </section>
       </div>
+
+      <!-- Air/Fuel Ratio Tab -->
+      <div class="tab-content" data-tab="afr">
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Average Error</div>
+              <div class="stat-value" id="afr-avgError">0.000 λ</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Max Deviation</div>
+              <div class="stat-value" id="afr-maxLean">0.000 λ</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Time in Target</div>
+              <div class="stat-value" id="afr-inTargetPercent">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Lean / Rich Events</div>
+              <div class="stat-value" id="afr-leanRichEvents">0 / 0</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+            <h2>Analysis Charts</h2>
+            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="afr-showAFRToggle" style="cursor: pointer;">
+                <span>Show AFR (λ × 14.7)</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="afr-smoothDataToggle" style="cursor: pointer;">
+                <span>Enable Data Smoothing</span>
+              </label>
+            </div>
+          </div>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Target AFR vs Measured AFR</h3>
+              </div>
+              <canvas id="afr-targetChart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>AFR Error Over Time</h3>
+              </div>
+              <canvas id="afr-errorChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- AFR Events Table -->
+        <section class="anomaly-section">
+          <h2>Air/Fuel Ratio Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="afr-searchInput" placeholder="Search..." class="search-input">
+            <select id="afr-eventTypeFilter" class="filter-select">
+              <option value="all">All Event Types</option>
+              <option value="lean">Lean</option>
+              <option value="rich">Rich</option>
+              <option value="normal">Normal</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="afr-afrTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="targetAFR">Target AFR (λ) ↕</th>
+                  <th data-sort="measuredAFR">Measured AFR (λ) ↕</th>
+                  <th data-sort="afrError">Error (λ) ↕</th>
+                  <th data-sort="afrErrorPercent">Error (%) ↕</th>
+                  <th data-sort="eventType">Event Type ↕</th>
+                </tr>
+              </thead>
+              <tbody id="afr-afrTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div id="loadingIndicator" class="loading" style="display: none;">
@@ -233,9 +321,11 @@
   <script src="../analysis/dataProcessor.js"></script>
   <script src="../analysis/knockDetector.js"></script>
   <script src="../analysis/boostControlAnalyzer.js"></script>
+  <script src="../analysis/afrAnalyzer.js"></script>
   <script src="tabManager.js"></script>
   <script src="tabs/knockAnalysisTab.js"></script>
   <script src="tabs/boostControlTab.js"></script>
+  <script src="tabs/afrAnalysisTab.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
