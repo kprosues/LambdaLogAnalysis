@@ -1,6 +1,6 @@
 {
   "name": "ecu-log-analysis-tool",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Desktop application for analyzing ECU log files and detecting anomalies",
   "main": "main.js",
   "scripts": {
