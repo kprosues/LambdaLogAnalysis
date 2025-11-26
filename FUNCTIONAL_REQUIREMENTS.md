@@ -1094,16 +1094,244 @@ ECULogAnalysisTool/
 - **Fuel Trim Events**: Array of grouped events with type (positive/negative), trim value, duration
 - **Tab Cache**: Map structure for O(1) lookup of analysis results
 
-### UI/UX Features
-- **Responsive Design**: CSS Grid with `auto-fit` and `minmax()` for flexible layouts
-- **Visual Feedback**: Hover states, active tab highlighting, drag-over effects
-- **Loading States**: Modal spinner + inline progress bar
-- **Error Messages**: Inline warning panels in all tabs when required columns not found
-  - Visual warning boxes with color-coded styling (yellow/amber for warnings)
-  - Expandable details sections showing all available columns
-  - Potential column suggestions (e.g., pressure columns for boost analysis)
-  - Console logging for technical debugging
-- **Table Interactions**: Sortable columns, real-time search, filter dropdowns
+### UI/UX Design System
+
+#### Color Palette
+- **Primary Background**: `#f5f5f5` (light gray)
+- **Content Background**: `white` (`#ffffff`)
+- **Primary Text**: `#333` (dark gray)
+- **Secondary Text**: `#666` (medium gray)
+- **Tertiary Text**: `#999` (light gray)
+- **Primary Accent**: `#333` (dark gray for buttons, headers)
+- **Secondary Accent**: `#666` (medium gray for secondary buttons)
+- **Chart Background**: `#f8f9fa` (very light gray)
+- **Border Color**: `#e0e0e0` (light border gray)
+- **Hover Background**: `#f5f5f5` (light gray)
+- **Active Tab Border**: `#333` (dark gray, 3px solid)
+- **Stat Card Background**: `#333` (dark gray with white text)
+- **Table Header**: `#333` (dark gray with white text)
+- **Row Hover**: `#f5f5f5` (light gray)
+- **Loading Overlay**: `rgba(100, 100, 100, 0.85)` (semi-transparent gray)
+- **Progress Bar**: `#333` (dark gray) with gradient overlay
+- **Severity Badges**:
+  - Mild: `#e0e0e0` background, `#333` text
+  - Moderate: `#ccc` background, `#333` text
+  - Severe: `#999` background, white text
+
+#### Typography
+- **Font Family**: System font stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif`)
+- **Heading 1**: 28px, font-weight 600, color `#333`
+- **Heading 2**: 22px, font-weight 600, color `#333`
+- **Heading 3**: 16px, font-weight 500, color `#555`
+- **Body Text**: 14px, font-weight 400, color `#333`
+- **Stat Value**: 32px, font-weight 700, white text on dark background
+- **Stat Label**: 14px, opacity 0.9, white text on dark background
+- **File Name**: 14px, italic, color `#666`
+- **Button Text**: 14px, font-weight 500
+- **Table Header**: 14px, font-weight 600, white text
+- **Table Cell**: 14px, font-weight 400
+
+#### Spacing and Layout
+- **Container Padding**: 20px
+- **Header Padding**: 20px 30px
+- **Content Area Padding**: 30px
+- **Section Margins**: 30px bottom margin
+- **Grid Gaps**: 20px (stats grid, charts container)
+- **Button Padding**: 10px 20px (primary/secondary), 6px 12px (reset zoom)
+- **Table Cell Padding**: 12px 15px (body), 15px (header)
+- **Stat Card Padding**: 20px
+- **Chart Wrapper Padding**: 20px
+- **Border Radius**: 
+  - Large: 12px (header, content area, drop zone)
+  - Medium: 8px (stat cards, chart wrappers, tables, progress section)
+  - Small: 6px (buttons, inputs, selects)
+  - Badge: 12px (severity badges)
+
+#### Component Styling
+
+**Buttons**
+- **Primary Button** (`.btn-primary`):
+  - Background: `#333`, color: white
+  - Hover: `#555` background, `translateY(-2px)`, shadow `0 4px 8px rgba(0, 0, 0, 0.2)`
+  - Transition: `all 0.3s ease`
+- **Secondary Button** (`.btn-secondary`):
+  - Background: `#666`, color: white
+  - Hover: `#555` background, `translateY(-2px)`, shadow
+  - Transition: `all 0.3s ease`
+- **Reset Zoom Button** (`.reset-zoom-btn`):
+  - Background: `#666`, color: white
+  - Hover: `#555` background, `translateY(-1px)`, shadow
+  - Active: `translateY(0)`
+
+**Tab Navigation**
+- **Tab Container**: Flexbox layout, border-bottom `2px solid #e0e0e0`
+- **Tab Button** (`.tab-btn`):
+  - Padding: `12px 24px`
+  - Color: `#666` (inactive), `#333` (active)
+  - Border-bottom: `3px solid transparent` (inactive), `3px solid #333` (active)
+  - Hover: `#333` color, `#f5f5f5` background
+  - Active: `#333` color, `font-weight: 600`
+  - Transition: `all 0.3s ease`
+
+**Statistics Cards**
+- **Stat Card** (`.stat-card`):
+  - Background: `#333`, color: white
+  - Border-radius: `8px`
+  - Box-shadow: `0 2px 4px rgba(0, 0, 0, 0.1)`
+  - Text-align: center
+  - Grid: `repeat(auto-fit, minmax(200px, 1fr))` with 20px gap
+
+**Charts**
+- **Chart Wrapper** (`.chart-wrapper`):
+  - Background: `#f8f9fa`
+  - Padding: `20px`
+  - Border-radius: `8px`
+  - Box-shadow: `0 2px 4px rgba(0, 0, 0, 0.05)`
+- **Chart Canvas**: Fixed height `400px`, width `100%`
+- **Chart Header**: Flexbox, space-between alignment
+
+**Tables**
+- **Table Container** (`.table-container`):
+  - Overflow-x: auto
+  - Border-radius: `8px`
+  - Box-shadow: `0 2px 4px rgba(0, 0, 0, 0.05)`
+- **Table Header** (`.anomaly-table thead`):
+  - Background: `#333`, color: white
+  - Cursor: pointer (sortable)
+  - User-select: none
+  - Hover: `rgba(255, 255, 255, 0.1)` background
+- **Table Rows** (`.anomaly-table tbody tr`):
+  - Border-bottom: `1px solid #e0e0e0`
+  - Transition: `background-color 0.2s`
+  - Hover: `#f5f5f5` background
+  - Clickable rows: pointer cursor, hover background `#e8f4f8`
+
+**Form Controls**
+- **Search Input** (`.search-input`):
+  - Flex: 1 (takes available space)
+  - Border: `2px solid #e0e0e0`
+  - Border-radius: `6px`
+  - Focus: border-color `#666`
+  - Transition: `border-color 0.3s`
+- **Filter Select** (`.filter-select`):
+  - Padding: `10px 15px`
+  - Border: `2px solid #e0e0e0`
+  - Border-radius: `6px`
+  - Background: white
+  - Cursor: pointer
+  - Focus: border-color `#666`
+  - Transition: `border-color 0.3s`
+
+**Drop Zone**
+- **Drop Zone** (`.drop-zone`):
+  - Background: white
+  - Border: `3px dashed #999`
+  - Border-radius: `12px`
+  - Padding: `60px`
+  - Text-align: center
+  - Cursor: pointer
+  - Transition: `all 0.3s ease`
+  - Hover: `#f5f5f5` background, `#666` border-color
+  - Drag-over: `#e0e0e0` background, `#333` border-color, `scale(1.02)`
+
+**Loading States**
+- **Content Loading Overlay** (`.content-loading-overlay`):
+  - Position: absolute, full coverage
+  - Background: `rgba(100, 100, 100, 0.85)`
+  - Z-index: 100
+  - Flexbox: column, centered
+  - Padding-top: `80px`
+- **Tab Loading Overlay** (`.tab-loading-overlay`):
+  - Position: absolute, full coverage
+  - Background: `rgba(100, 100, 100, 0.85)`
+  - Z-index: 50
+  - Flexbox: column, centered
+  - Padding-top: `60px`
+- **Loading State** (`.loading`):
+  - Opacity: `0.5`
+  - Filter: `grayscale(0.3)`
+  - Pointer-events: none
+  - Transition: `opacity 0.3s ease, filter 0.3s ease`
+- **Spinner**:
+  - Border: `4px solid rgba(255, 255, 255, 0.3)`
+  - Border-top: `4px solid white`
+  - Border-radius: `50%`
+  - Size: `50px` (content overlay), `40px` (tab overlay)
+  - Animation: `spin 1s linear infinite`
+
+**Progress Bar**
+- **Progress Section** (`.progress-section`):
+  - Background: white
+  - Padding: `15px 20px`
+  - Border-radius: `8px`
+  - Box-shadow: `0 2px 4px rgba(0, 0, 0, 0.1)`
+- **Progress Bar** (`.progress-bar`):
+  - Background: `#333`
+  - Border-radius: `10px`
+  - Height: `20px`
+  - Transition: `width 0.4s ease-out`
+  - Box-shadow: `0 1px 3px rgba(0, 0, 0, 0.2)`
+
+**Severity Badges**
+- **Base Badge** (`.severity-badge`):
+  - Display: inline-block
+  - Padding: `4px 12px`
+  - Border-radius: `12px`
+  - Font-size: `12px`
+  - Font-weight: `600`
+  - Text-transform: uppercase
+- **Severity Classes** (used in analysis tabs):
+  - `.severity-mild`: `#e0e0e0` background, `#333` text
+  - `.severity-moderate`: `#ccc` background, `#333` text
+  - `.severity-severe`: `#999` background, white text
+- **Log Score Badge Classes** (used in Log Score tab):
+  - `.badge-severe`: Severe issues (high priority)
+  - `.badge-warning`: High severity issues
+  - `.badge-info`: Low severity issues
+  - `.badge-mild`: Mild severity issues
+  - `.badge-default`: Default/unknown severity
+  - Note: These classes are dynamically applied in `logScoreTab.js` and should be styled consistently with severity-badge patterns
+
+#### Interactive States and Transitions
+- **Hover Effects**: 
+  - Buttons: `translateY(-2px)` with shadow
+  - Tab buttons: color change, background highlight
+  - Table rows: background color change
+  - Table headers: semi-transparent white overlay
+- **Active States**:
+  - Tab buttons: bold font, colored border
+  - Buttons: `translateY(0)` on active
+- **Focus States**:
+  - Inputs/selects: border color change to `#666`
+  - Outline: none (custom border styling)
+- **Transitions**: 
+  - Most interactive elements: `0.3s ease`
+  - Table rows: `0.2s` for background color
+  - Progress bar: `0.4s ease-out`
+
+#### Responsive Design
+- **Breakpoint**: `768px` (mobile/tablet)
+- **Mobile Adaptations**:
+  - Header: flex-direction column, centered text
+  - Charts: height reduced to `300px`
+  - Stats grid: `repeat(2, 1fr)` (2 columns)
+  - Charts container: single column layout
+
+#### Visual Feedback Patterns
+- **Hover States**: Background color changes, cursor pointer, subtle transforms
+- **Active Tab Highlighting**: Bold font, colored bottom border
+- **Drag-over Effects**: Scale transform, color change
+- **Loading Indicators**: Spinner animation, overlay with opacity/grayscale
+- **Sort Indicators**: Arrow symbols (↑ ↓) appended to column headers
+- **Clickable Rows**: Pointer cursor, hover background `#e8f4f8`, tooltip text
+- **Error/Warning Panels**: Yellow/amber background, expandable details sections
+
+#### Accessibility Considerations
+- **Color Contrast**: High contrast text on backgrounds (white on `#333`, `#333` on white)
+- **Interactive Elements**: Clear hover states, pointer cursor, focus indicators
+- **Text Sizing**: Minimum 12px font size, readable hierarchy
+- **User Selection**: Disabled on sortable headers (`user-select: none`)
+- **Keyboard Navigation**: Focus states on form controls
 
 ---
 
@@ -1464,5 +1692,5 @@ This document contains 41 functional requirements covering:
 - Loading overlays and visual feedback (FR40)
 - Log Score aggregation and navigation (FR41)
 
-Each requirement includes detailed acceptance criteria and implementation details to ensure proper implementation and testing. The document also includes framework decisions, architecture overview, and technical specifications for developers.
+Each requirement includes detailed acceptance criteria and implementation details to ensure proper implementation and testing. The document also includes framework decisions, architecture overview, technical specifications for developers, and a comprehensive UI/UX Design System section documenting color palettes, typography, spacing, component styling, interactive states, and responsive design patterns.
 
