@@ -5,6 +5,7 @@ class FuelTrimAnalyzer {
     this.analysisResults = null;
     this.abnormalThreshold = 10.0; // % - values exceeding +/- 10% are abnormal
     this.groupingTimeWindow = 0.5; // Group events within 0.5 seconds (500ms)
+    this.minimumDuration = 0.3; // Minimum duration in seconds (300ms) for events to be reported
   }
 
   analyze() {
@@ -79,9 +80,45 @@ class FuelTrimAnalyzer {
         return;
       }
 
+      const rpm = row['Engine Speed (rpm)'] || 0;
+      const throttle = row['Throttle Position (%)'] || 0;
+      const load = row['Load (MAF) (g/rev)'] || 0;
+      const ect = row['Coolant Temperature (°C)'] || 0;
+      const iat = row['Intake Air Temperature (°C)'] || 0;
+
+      // Check if in PE mode (STFT should be near 0% in open-loop)
+      let isPEMode = false;
+      if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+        isPEMode = window.tuneFileParser.isPEModeActive(rpm, load, throttle);
+      }
+
+      // Filter out STFT events during PE mode (expected to be near 0% in open-loop)
+      // Only analyze STFT during closed-loop operation
+      if (isPEMode) {
+        // In PE mode, STFT should be near 0%. Flag if it's not.
+        // Use stricter threshold for PE mode (5% instead of 10%)
+        if (Math.abs(shortTermTrim) > 5.0) {
+          // This is abnormal - STFT should be near 0% in PE mode
+          events.push({
+            index: index,
+            time: time,
+            shortTermTrim: shortTermTrim,
+            rpm: rpm,
+            throttle: throttle,
+            load: load,
+            afr: row['Air/Fuel Sensor #1 (λ)'] || 0,
+            eventType: shortTermTrim > 0 ? 'positive' : 'negative',
+            isPEMode: true,
+            isAbnormalInPEMode: true
+          });
+        }
+        // Don't count PE mode data points in normal statistics
+        return;
+      }
+
       validDataPointCount++;
 
-      // Track statistics
+      // Track statistics (only for closed-loop operation)
       totalTrim += shortTermTrim;
       totalTrimAbs += Math.abs(shortTermTrim);
       
@@ -101,23 +138,52 @@ class FuelTrimAnalyzer {
       // Positive = adding fuel (rich condition, ECU trying to lean out)
       // Negative = removing fuel (lean condition, ECU trying to enrich)
       let eventType = 'normal';
+      let severity = 'normal';
+      
+      // Check trim limits
+      const trimLimitWarning = 20.0; // Approaching ECU limits
+      const trimLimitMax = 25.0; // ECU limit reached
+      
       if (shortTermTrim > this.abnormalThreshold) {
-        eventType = 'positive'; // Positive trim (adding fuel, rich condition)
+        eventType = 'positive';
+        if (shortTermTrim >= trimLimitMax) {
+          severity = 'critical'; // At or above ECU limit
+        } else if (shortTermTrim >= trimLimitWarning) {
+          severity = 'severe'; // Approaching limit
+        }
       } else if (shortTermTrim < -this.abnormalThreshold) {
-        eventType = 'negative'; // Negative trim (removing fuel, lean condition)
+        eventType = 'negative';
+        if (shortTermTrim <= -trimLimitMax) {
+          severity = 'critical'; // At or below ECU limit
+        } else if (shortTermTrim <= -trimLimitWarning) {
+          severity = 'severe'; // Approaching limit
+        }
       }
 
+      // Check if high trim is expected (compensation-aware)
+      // High trim during cold start may be expected
+      const isColdStart = ect < 60; // Below 60°C is cold
+      // High trim during acceleration may be expected (accel enrichment)
+      const isAcceleration = throttle > 50 && load > 1.0;
+      
       // Create events for abnormal conditions (exceeding +/- 10%)
+      // But flag if high trim is expected vs unexpected
       if (eventType !== 'normal') {
         events.push({
           index: index,
           time: time,
           shortTermTrim: shortTermTrim,
-          rpm: row['Engine Speed (rpm)'] || 0,
-          throttle: row['Throttle Position (%)'] || 0,
-          load: row['Load (MAF) (g/rev)'] || 0,
+          rpm: rpm,
+          throttle: throttle,
+          load: load,
           afr: row['Air/Fuel Sensor #1 (λ)'] || 0,
-          eventType: eventType
+          eventType: eventType,
+          severity: severity,
+          isPEMode: false,
+          isColdStart: isColdStart,
+          isAcceleration: isAcceleration,
+          ect: ect,
+          iat: iat
         });
       }
     });
@@ -126,11 +192,18 @@ class FuelTrimAnalyzer {
     console.log(`Raw fuel trim events detected (before grouping): ${events.length}`);
     const groupedEvents = this.groupFuelTrimEvents(events);
     console.log(`Grouped fuel trim events: ${groupedEvents.length}`);
+    
+    // Filter out events that don't meet minimum duration requirement
+    const filteredEvents = groupedEvents.filter(event => {
+      const duration = event.duration || 0;
+      return duration >= this.minimumDuration;
+    });
+    console.log(`Fuel trim events after minimum duration filter (${this.minimumDuration}s): ${filteredEvents.length}`);
 
     const inTargetPercent = validDataPointCount > 0 ? (inTargetCount / validDataPointCount) * 100 : 0;
 
     this.analysisResults = {
-      events: groupedEvents,
+      events: filteredEvents,
       statistics: {
         totalDataPoints: validDataPointCount,
         avgTrim: validDataPointCount > 0 ? totalTrim / validDataPointCount : 0,
@@ -138,9 +211,9 @@ class FuelTrimAnalyzer {
         maxPositive: maxPositive,
         maxNegative: maxNegative,
         inTargetPercent: inTargetPercent,
-        abnormalEvents: groupedEvents.length,
-        positiveEvents: groupedEvents.filter(e => e.eventType === 'positive').length,
-        negativeEvents: groupedEvents.filter(e => e.eventType === 'negative').length,
+        abnormalEvents: filteredEvents.length,
+        positiveEvents: filteredEvents.filter(e => e.eventType === 'positive').length,
+        negativeEvents: filteredEvents.filter(e => e.eventType === 'negative').length,
         timeRange: this.dataProcessor ? this.dataProcessor.getTimeRange() : { min: 0, max: 0 }
       },
       columns: {
@@ -232,6 +305,11 @@ class FuelTrimAnalyzer {
       load: avgLoad,
       afr: avgAfr,
       eventType: mostSevereEvent.eventType,
+      severity: mostSevereEvent.severity || 'normal',
+      isPEMode: eventGroup.some(e => e.isPEMode === true),
+      isAbnormalInPEMode: eventGroup.some(e => e.isAbnormalInPEMode === true),
+      isColdStart: eventGroup.some(e => e.isColdStart === true),
+      isAcceleration: eventGroup.some(e => e.isAcceleration === true),
       eventCount: eventGroup.length // Number of data points in this grouped event
     };
   }

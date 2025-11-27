@@ -15,7 +15,7 @@ const AFRAnalysisTab = {
   charts: {},
   chartOriginalRanges: {},
   currentSort: { column: null, direction: 'asc' },
-  showAFR: false, // Toggle between lambda and AFR values
+  showAFR: true, // Always show AFR values (converted from lambda)
   AFR_CONVERSION_FACTOR: 14.7, // 1 lambda = 14.7 AFR
 
   initialize() {
@@ -36,56 +36,7 @@ const AFRAnalysisTab = {
       this.elements.eventTypeFilter.addEventListener('change', () => this.updateTable());
     }
 
-    // Set up AFR toggle
-    const afrToggle = document.getElementById('afr-showAFRToggle');
-    if (afrToggle) {
-      afrToggle.addEventListener('change', async (e) => {
-        this.showAFR = e.target.checked;
-        
-        // Show loading overlay immediately
-        const tabContent = document.querySelector('.tab-content[data-tab="afr"]');
-        if (tabContent) {
-          tabContent.classList.add('loading');
-          const overlay = tabContent.querySelector('.tab-loading-overlay');
-          if (overlay) {
-            overlay.style.display = 'flex';
-          }
-        }
-        
-        // Use multiple animation frames to ensure overlay is visible before operations
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        const startTime = Date.now();
-        const minDisplayTime = 300; // Minimum time to show overlay (ms)
-        
-        try {
-          // Update statistics with new units
-          this.updateStatistics();
-          
-          // Re-render charts with updated units, preserve zoom
-          this.renderCharts(true);
-          
-          // Re-render table with updated units
-          this.updateTable();
-          
-          // Ensure minimum display time
-          const elapsed = Date.now() - startTime;
-          const remainingTime = Math.max(0, minDisplayTime - elapsed);
-          await new Promise(resolve => setTimeout(resolve, remainingTime));
-        } finally {
-          // Hide loading overlay
-          if (tabContent) {
-            tabContent.classList.remove('loading');
-            const overlay = tabContent.querySelector('.tab-loading-overlay');
-            if (overlay) {
-              overlay.style.display = 'none';
-            }
-          }
-        }
-      });
-    }
+    // AFR conversion is always enabled (no toggle)
 
     // Set up table sorting
     document.querySelectorAll('#afr-afrTable th[data-sort]').forEach(th => {
@@ -191,10 +142,10 @@ const AFRAnalysisTab = {
       return;
     }
     
-    // Apply conversion factor if AFR mode is enabled
-    const conversionFactor = this.showAFR ? this.AFR_CONVERSION_FACTOR : 1.0;
-    const unitLabel = this.showAFR ? 'AFR' : 'λ';
-    const decimalPlaces = this.showAFR ? 1 : 3;
+    // Always apply AFR conversion factor
+    const conversionFactor = this.AFR_CONVERSION_FACTOR;
+    const unitLabel = 'AFR';
+    const decimalPlaces = 1;
     
     if (this.elements.avgError) {
       const avgError = stats.avgErrorAbs * conversionFactor;
@@ -264,6 +215,9 @@ const AFRAnalysisTab = {
     
     const times = data.map(row => row['Time (s)']);
     
+    // Get RPM data for tooltips
+    const rpms = data.map(row => parseFloat(row['Engine Speed (rpm)']) || 0);
+    
     // Helper function to break lines at gaps > 1 second
     const breakAtGaps = (dataArray, timeArray) => {
       const result = [...dataArray];
@@ -288,8 +242,8 @@ const AFRAnalysisTab = {
     // Get throttle position data
     const throttlePositionsRaw = data.map(row => parseFloat(row['Throttle Position (%)']) || 0);
     
-    // Convert lambda to AFR if toggle is enabled (AFR = lambda × 14.7)
-    const conversionFactor = this.showAFR ? this.AFR_CONVERSION_FACTOR : 1.0;
+    // Always convert lambda to AFR (AFR = lambda × 14.7)
+    const conversionFactor = this.AFR_CONVERSION_FACTOR;
     const targetAFRsForChart = targetAFRsRaw.map(v => v * conversionFactor);
     const measuredAFRsForChart = measuredAFRsRaw.map(v => v * conversionFactor);
     
@@ -354,7 +308,26 @@ const AFRAnalysisTab = {
         },
         tooltip: {
           mode: 'index',
-          intersect: false
+          intersect: false,
+          callbacks: {
+            filter: (tooltipItem, data) => {
+              // Remove lean events and rich events from tooltip
+              const datasetIndex = tooltipItem.datasetIndex;
+              const datasetLabel = data.datasets[datasetIndex]?.label || '';
+              return datasetLabel !== 'Lean Events' && datasetLabel !== 'Rich Events';
+            },
+            footer: (tooltipItems) => {
+              // Use TooltipConfig to get footer text
+              if (tooltipItems.length > 0 && window.TooltipConfig && window.dataProcessor) {
+                const dataIndex = tooltipItems[0].dataIndex;
+                const data = window.dataProcessor.getData();
+                if (data && dataIndex >= 0 && dataIndex < data.length) {
+                  return window.TooltipConfig.getTooltipFooter(dataIndex, data);
+                }
+              }
+              return '';
+            }
+          }
         },
         zoom: {
           zoom: {
@@ -406,8 +379,8 @@ const AFRAnalysisTab = {
     if (this.charts.target) this.charts.target.destroy();
     const targetChartEl = document.getElementById('afr-targetChart');
     if (targetChartEl) {
-      // Set unit label based on toggle state
-      const unitLabel = this.showAFR ? 'AFR' : 'λ';
+      // Always use AFR unit label
+      const unitLabel = 'AFR';
       
       const datasets = [
         {
@@ -704,47 +677,66 @@ const AFRAnalysisTab = {
       });
     }
     
-    // Sort events
-    const sortedEvents = [...filteredEvents].sort((a, b) => {
-      let aVal, bVal;
-      switch (this.currentSort.column) {
-        case 'time':
-          aVal = a.time;
-          bVal = b.time;
-          break;
-        case 'targetAFR':
-          aVal = a.targetAFR;
-          bVal = b.targetAFR;
-          break;
-        case 'measuredAFR':
-          aVal = a.measuredAFR;
-          bVal = b.measuredAFR;
-          break;
-        case 'afrError':
-          aVal = Math.abs(a.afrError);
-          bVal = Math.abs(b.afrError);
-          break;
-        case 'afrErrorPercent':
-          aVal = Math.abs(a.afrErrorPercent);
-          bVal = Math.abs(b.afrErrorPercent);
-          break;
-        case 'eventType':
-          aVal = a.eventType;
-          bVal = b.eventType;
-          break;
-        default:
-          return 0;
-      }
-      
-      if (this.currentSort.direction === 'asc') {
-        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-      } else {
-        return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
-      }
-    });
-    
-    // Update table headers based on toggle state
-    const unitSymbol = this.showAFR ? 'AFR' : 'λ';
+     // Always use AFR unit symbol
+     const unitSymbol = 'AFR';
+     
+     // Always apply AFR conversion factor (define before sorting so it can be used in sort logic)
+     const conversionFactor = this.AFR_CONVERSION_FACTOR;
+     
+     // Sort events
+     const sortedEvents = [...filteredEvents].sort((a, b) => {
+       let aVal, bVal;
+       switch (this.currentSort.column) {
+         case 'time':
+           aVal = a.time;
+           bVal = b.time;
+           break;
+         case 'targetAFR':
+           aVal = a.targetAFR;
+           bVal = b.targetAFR;
+           break;
+         case 'measuredAFR':
+           aVal = a.measuredAFR;
+           bVal = b.measuredAFR;
+           break;
+         case 'afrError':
+           // Calculate error from converted AFR values (same as display)
+           // This ensures sorting matches what's displayed
+           const aTargetAFRForError = a.targetAFR * conversionFactor;
+           const aMeasuredAFRForError = a.measuredAFR * conversionFactor;
+           aVal = Math.abs(aMeasuredAFRForError - aTargetAFRForError);
+           
+           const bTargetAFRForError = b.targetAFR * conversionFactor;
+           const bMeasuredAFRForError = b.measuredAFR * conversionFactor;
+           bVal = Math.abs(bMeasuredAFRForError - bTargetAFRForError);
+           break;
+         case 'afrErrorPercent':
+           // Calculate error percentage from converted AFR values (same as display)
+           // This ensures sorting matches what's displayed
+           const aTargetAFR = a.targetAFR * conversionFactor;
+           const aMeasuredAFR = a.measuredAFR * conversionFactor;
+           const aErrorAFR = aMeasuredAFR - aTargetAFR;
+           aVal = aTargetAFR > 0 ? Math.abs((aErrorAFR / aTargetAFR) * 100) : 0;
+           
+           const bTargetAFR = b.targetAFR * conversionFactor;
+           const bMeasuredAFR = b.measuredAFR * conversionFactor;
+           const bErrorAFR = bMeasuredAFR - bTargetAFR;
+           bVal = bTargetAFR > 0 ? Math.abs((bErrorAFR / bTargetAFR) * 100) : 0;
+           break;
+         case 'eventType':
+           aVal = a.eventType;
+           bVal = b.eventType;
+           break;
+         default:
+           return 0;
+       }
+       
+       if (this.currentSort.direction === 'asc') {
+         return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+       } else {
+         return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+       }
+     });
     
     // Column map for header updates
     const columnMap = {
@@ -761,25 +753,35 @@ const AFRAnalysisTab = {
     const sortIndicator = currentSortColumn && this.currentSort.direction === 'asc' ? ' ↑' : 
                          currentSortColumn ? ' ↓' : '';
     
-    // Update header labels
+    // Update header labels - use stored base text or extract from original HTML
+    // Store base text in data attribute on first run to avoid extraction issues
     document.querySelectorAll('#afr-afrTable th[data-sort="targetAFR"]').forEach(th => {
-      const baseText = th.textContent.replace(' ↑', '').replace(' ↓', '').replace(/\(.*\)/, '').trim();
+      if (!th.dataset.baseText) {
+        // Store original base text on first access
+        th.dataset.baseText = th.textContent.replace(/ ↑| ↓|↕/g, '').replace(/\(.*?\)/g, '').trim() || 'Target AFR';
+      }
+      const baseText = th.dataset.baseText;
       const indicator = currentSortColumn === columnMap['targetAFR'] ? sortIndicator : '';
       th.textContent = `${baseText} (${unitSymbol}) ↕${indicator}`;
     });
     document.querySelectorAll('#afr-afrTable th[data-sort="measuredAFR"]').forEach(th => {
-      const baseText = th.textContent.replace(' ↑', '').replace(' ↓', '').replace(/\(.*\)/, '').trim();
+      if (!th.dataset.baseText) {
+        th.dataset.baseText = th.textContent.replace(/ ↑| ↓|↕/g, '').replace(/\(.*?\)/g, '').trim() || 'Measured AFR';
+      }
+      const baseText = th.dataset.baseText;
       const indicator = currentSortColumn === columnMap['measuredAFR'] ? sortIndicator : '';
       th.textContent = `${baseText} (${unitSymbol}) ↕${indicator}`;
     });
     document.querySelectorAll('#afr-afrTable th[data-sort="afrError"]').forEach(th => {
-      const baseText = th.textContent.replace(' ↑', '').replace(' ↓', '').replace(/\(.*\)/, '').trim();
+      if (!th.dataset.baseText) {
+        th.dataset.baseText = th.textContent.replace(/ ↑| ↓|↕/g, '').replace(/\(.*?\)/g, '').trim() || 'Error';
+      }
+      const baseText = th.dataset.baseText;
       const indicator = currentSortColumn === columnMap['afrError'] ? sortIndicator : '';
       th.textContent = `${baseText} (${unitSymbol}) ↕${indicator}`;
     });
     
-    // Apply conversion factor if AFR mode is enabled
-    const conversionFactor = this.showAFR ? this.AFR_CONVERSION_FACTOR : 1.0;
+    // Always apply AFR conversion factor (already set above)
     
     // Clear table
     this.elements.afrTableBody.innerHTML = '';
@@ -801,18 +803,21 @@ const AFRAnalysisTab = {
         ? `${event.time.toFixed(2)} (${event.duration.toFixed(3)}s)`
         : event.time.toFixed(2);
       
-      // Convert values if AFR mode is enabled
+      // Always convert lambda values to AFR
       const targetDisplay = event.targetAFR * conversionFactor;
       const measuredDisplay = event.measuredAFR * conversionFactor;
       
-      // Use maxAFRError if available (for grouped events), otherwise use afrError
-      const errorDisplay = (event.maxAFRError !== undefined ? event.maxAFRError : event.afrError) * conversionFactor;
-      const errorPercentDisplay = event.maxAFRError !== undefined && event.targetAFR > 0
-        ? ((event.maxAFRError / event.targetAFR) * 100).toFixed(2)
-        : event.afrErrorPercent.toFixed(2);
+      // Calculate error as the difference between converted values (to match displayed target/measured)
+      // This ensures the error matches what you see: measured - target in AFR units
+      const errorDisplay = measuredDisplay - targetDisplay;
       
-      // Adjust decimal places based on unit (AFR needs fewer decimals, lambda needs more)
-      const decimalPlaces = this.showAFR ? 1 : 3;
+      // Calculate error percentage from the actual displayed values
+      const errorPercentDisplay = targetDisplay > 0
+        ? ((errorDisplay / targetDisplay) * 100).toFixed(2)
+        : '0.00';
+      
+      // Always use 1 decimal place for AFR
+      const decimalPlaces = 1;
       
       row.innerHTML = `
         <td>${timeDisplay}</td>
@@ -864,8 +869,10 @@ const AFRAnalysisTab = {
       this.currentSort.direction = 'asc';
     }
     
+    // Update sort indicators - remove all existing arrows first using regex
     document.querySelectorAll('#afr-afrTable th').forEach(th => {
-      th.textContent = th.textContent.replace(' ↑', '').replace(' ↓', '');
+      // Remove all arrow indicators (may be multiple if bug occurred)
+      th.textContent = th.textContent.replace(/ ↑+| ↓+/g, '');
       if (th.dataset.sort === column) {
         th.textContent += this.currentSort.direction === 'asc' ? ' ↑' : ' ↓';
       }

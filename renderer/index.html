@@ -9,15 +9,18 @@
 <body>
   <div class="container">
     <header>
-      <h1>ECU Log Analysis Tool</h1>
+      <img src="../assets/logo.png" alt="ECU Log Analysis Tool" class="app-logo">
       <div class="file-controls">
-        <button id="openFileBtn" class="btn btn-primary">Open Log File</button>
+        <button id="openTuneFileBtn" class="btn btn-primary">Load Tune File</button>
+        <button id="openFileBtn" class="btn btn-secondary" disabled title="Please load a tune file first">Open Log File</button>
         <button id="resetZoomBtn" class="btn btn-secondary" style="display: none;">Reset Zoom</button>
+        <button id="openTooltipSettingsBtn" class="btn btn-secondary" title="Configure tooltip fields">Tooltip Settings</button>
         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 15px;">
           <input type="checkbox" id="global-smoothDataToggle" style="cursor: pointer;" checked>
           <span style="font-size: 14px; color: #333;">Enable Data Smoothing</span>
         </label>
         <span id="fileName" class="file-name">No file loaded</span>
+        <span id="tuneFileName" class="file-name" style="margin-left: 10px; display: none;">No tune file loaded</span>
       </div>
     </header>
 
@@ -29,6 +32,26 @@
       </div>
       <div class="progress-bar-container">
         <div id="progressBar" class="progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Tooltip Settings</h2>
+          <button class="modal-close" id="closeSettingsModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>Select which fields to display in chart tooltips:</p>
+          <div id="tooltipFieldsList" class="tooltip-fields-list">
+            <!-- Fields will be populated dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveTooltipSettings" class="btn btn-primary">Save</button>
+          <button id="cancelTooltipSettings" class="btn btn-secondary">Cancel</button>
+        </div>
       </div>
     </div>
 
@@ -49,6 +72,10 @@
         <button class="tab-btn" data-tab="afr">Air/Fuel Ratio</button>
         <button class="tab-btn" data-tab="fueltrim">Short Term Fuel Trim</button>
         <button class="tab-btn" data-tab="longtermfueltrim">Long Term Fuel Trim</button>
+        <button class="tab-btn" data-tab="iam">IAM Analysis</button>
+        <button class="tab-btn" data-tab="loadlimit">Load Limit</button>
+        <button class="tab-btn" data-tab="coolanttemp">Coolant Temperature</button>
+        <button class="tab-btn" data-tab="iat">Intake Air Temperature</button>
       </div>
 
       <!-- Log Score Tab -->
@@ -95,6 +122,10 @@
               <option value="afr">Air/Fuel Ratio</option>
               <option value="fueltrim">Short Term Fuel Trim</option>
               <option value="longtermfueltrim">Long Term Fuel Trim</option>
+              <option value="iam">IAM Analysis</option>
+              <option value="loadlimit">Load Limit</option>
+              <option value="coolanttemp">Coolant Temperature</option>
+              <option value="iat">Intake Air Temperature</option>
             </select>
             <select id="logscore-eventTypeFilter" class="filter-select">
               <option value="all">All Event Types</option>
@@ -105,6 +136,10 @@
               <option value="rich">Rich</option>
               <option value="positive">Positive Trim</option>
               <option value="negative">Negative Trim</option>
+              <option value="iam">IAM Events</option>
+              <option value="loadlimit">Load Limit Events</option>
+              <option value="coolanttemp">Coolant Temperature Events</option>
+              <option value="iat">Intake Air Temperature Events</option>
             </select>
             <select id="logscore-severityFilter" class="filter-select">
               <option value="all">All Severities</option>
@@ -310,9 +345,9 @@
               <thead>
                 <tr>
                   <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="boostTarget">Boost Target (kPa) ↕</th>
-                  <th data-sort="actualBoost">Actual Boost (kPa) ↕</th>
-                  <th data-sort="boostError">Error (kPa) ↕</th>
+                  <th data-sort="boostTarget">Boost Target (PSI) ↕</th>
+                  <th data-sort="actualBoost">Actual Boost (PSI) ↕</th>
+                  <th data-sort="boostError">Error (PSI) ↕</th>
                   <th data-sort="boostErrorPercent">Error (%) ↕</th>
                   <th data-sort="wastegateDC">Wastegate DC (%) ↕</th>
                   <th data-sort="eventType">Event Type ↕</th>
@@ -359,15 +394,7 @@
 
         <!-- Charts Section -->
         <section class="charts-section">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-            <h2>Analysis Charts</h2>
-            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" id="afr-showAFRToggle" style="cursor: pointer;">
-                <span>Show AFR (λ × 14.7)</span>
-              </label>
-            </div>
-          </div>
+          <h2>Analysis Charts</h2>
           <div class="charts-container">
             <div class="chart-wrapper">
               <div class="chart-header">
@@ -582,6 +609,332 @@
           </div>
         </section>
       </div>
+
+      <!-- IAM Analysis Tab -->
+      <div class="tab-content" data-tab="iam">
+        <!-- Tab Loading Overlay -->
+        <div class="tab-loading-overlay" style="display: none;">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+          </div>
+        </div>
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Current IAM</div>
+              <div class="stat-value" id="iam-currentIAM">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Min IAM</div>
+              <div class="stat-value" id="iam-minIAM">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Recovery Rate</div>
+              <div class="stat-value" id="iam-recoveryRate">0.0%/s</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Knock Correlation</div>
+              <div class="stat-value" id="iam-knockCorrelation">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Low IAM Events</div>
+              <div class="stat-value" id="iam-lowIAMEvents">0</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <h2>Analysis Charts</h2>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>IAM Over Time</h3>
+              </div>
+              <canvas id="iam-iamChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- IAM Events Table -->
+        <section class="anomaly-section">
+          <h2>IAM Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="iam-searchInput" placeholder="Search..." class="search-input">
+            <select id="iam-severityFilter" class="filter-select">
+              <option value="all">All Severities</option>
+              <option value="critical">Critical</option>
+              <option value="severe">Severe</option>
+              <option value="moderate">Moderate</option>
+              <option value="mild">Mild</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="iam-iamTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="iam">IAM (%) ↕</th>
+                  <th data-sort="rpm">RPM ↕</th>
+                  <th data-sort="throttle">Throttle (%) ↕</th>
+                  <th data-sort="load">Load (g/rev) ↕</th>
+                  <th data-sort="knockRetard">Knock Retard (°) ↕</th>
+                  <th data-sort="severity">Severity ↕</th>
+                </tr>
+              </thead>
+              <tbody id="iam-iamTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Load Limit Tab -->
+      <div class="tab-content" data-tab="loadlimit">
+        <!-- Tab Loading Overlay -->
+        <div class="tab-loading-overlay" style="display: none;">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+          </div>
+        </div>
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Max Load</div>
+              <div class="stat-value" id="loadlimit-maxLoad">0.0 g/rev</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Violations</div>
+              <div class="stat-value" id="loadlimit-violations">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Time Near Limit</div>
+              <div class="stat-value" id="loadlimit-timeNearLimit">0.0%</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <h2>Analysis Charts</h2>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Load vs Load Limit</h3>
+              </div>
+              <canvas id="loadlimit-loadChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- Load Limit Events Table -->
+        <section class="anomaly-section">
+          <h2>Load Limit Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="loadlimit-searchInput" placeholder="Search..." class="search-input">
+            <select id="loadlimit-eventTypeFilter" class="filter-select">
+              <option value="all">All Event Types</option>
+              <option value="limit_violation">Limit Violations</option>
+              <option value="near_limit">Near Limit</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="loadlimit-loadTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="load">Load (g/rev) ↕</th>
+                  <th data-sort="loadLimit">Limit (g/rev) ↕</th>
+                  <th data-sort="loadRatio">Ratio (%) ↕</th>
+                  <th data-sort="rpm">RPM ↕</th>
+                  <th data-sort="throttle">Throttle (%) ↕</th>
+                  <th data-sort="severity">Severity ↕</th>
+                  <th data-sort="fuelCut">Fuel Cut ↕</th>
+                </tr>
+              </thead>
+              <tbody id="loadlimit-loadTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Coolant Temperature Tab -->
+      <div class="tab-content" data-tab="coolanttemp">
+        <!-- Tab Loading Overlay -->
+        <div class="tab-loading-overlay" style="display: none;">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+          </div>
+        </div>
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Min Temperature</div>
+              <div class="stat-value" id="coolanttemp-minTemp">0.0 °C</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Max Temperature</div>
+              <div class="stat-value" id="coolanttemp-maxTemp">0.0 °C</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Average Temperature</div>
+              <div class="stat-value" id="coolanttemp-avgTemp">0.0 °C</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Time Above High Speed Fan</div>
+              <div class="stat-value" id="coolanttemp-timeAboveHighSpeedFan">0.0%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">High Temp Events</div>
+              <div class="stat-value" id="coolanttemp-highTempEvents">0</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <h2>Analysis Charts</h2>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Coolant Temperature Over Time</h3>
+              </div>
+              <canvas id="coolanttemp-coolantTempChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- Coolant Temperature Events Table -->
+        <section class="anomaly-section">
+          <h2>Coolant Temperature Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="coolanttemp-searchInput" placeholder="Search..." class="search-input">
+            <select id="coolanttemp-severityFilter" class="filter-select">
+              <option value="all">All Severities</option>
+              <option value="critical">Critical</option>
+              <option value="severe">Severe</option>
+              <option value="moderate">Moderate</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="coolanttemp-coolantTempTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="coolantTemp">Temperature (°C) ↕</th>
+                  <th data-sort="maxTemp">Max Temp (°C) ↕</th>
+                  <th data-sort="rpm">RPM ↕</th>
+                  <th data-sort="throttle">Throttle (%) ↕</th>
+                  <th data-sort="load">Load (g/rev) ↕</th>
+                  <th data-sort="severity">Severity ↕</th>
+                  <th data-sort="fanStatus">Fan Status ↕</th>
+                </tr>
+              </thead>
+              <tbody id="coolanttemp-coolantTempTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Intake Air Temperature Tab -->
+      <div class="tab-content" data-tab="iat">
+        <!-- Tab Loading Overlay -->
+        <div class="tab-loading-overlay" style="display: none;">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+          </div>
+        </div>
+        <!-- Statistics Panel -->
+        <section class="statistics-panel">
+          <h2>Summary Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Min IAT</div>
+              <div class="stat-value" id="iat-minIAT">0.0 °C</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Max IAT</div>
+              <div class="stat-value" id="iat-maxIAT">0.0 °C</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Average IAT</div>
+              <div class="stat-value" id="iat-avgIAT">0.0 °C</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">High Temp Events</div>
+              <div class="stat-value" id="iat-highTempEvents">0</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Low Temp Events</div>
+              <div class="stat-value" id="iat-lowTempEvents">0</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+          <h2>Analysis Charts</h2>
+          <div class="charts-container">
+            <div class="chart-wrapper">
+              <div class="chart-header">
+                <h3>Intake Air Temperature Over Time</h3>
+              </div>
+              <canvas id="iat-iatChart"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- Intake Air Temperature Events Table -->
+        <section class="anomaly-section">
+          <h2>Intake Air Temperature Events Detail</h2>
+          <div class="table-controls">
+            <input type="text" id="iat-searchInput" placeholder="Search..." class="search-input">
+            <select id="iat-severityFilter" class="filter-select">
+              <option value="all">All Severities</option>
+              <option value="critical">Critical</option>
+              <option value="severe">Severe</option>
+              <option value="moderate">Moderate</option>
+              <option value="mild">Mild</option>
+            </select>
+            <select id="iat-eventTypeFilter" class="filter-select">
+              <option value="all">All Types</option>
+              <option value="high_temp">High Temperature</option>
+              <option value="low_temp">Low Temperature</option>
+            </select>
+          </div>
+          <div class="table-container">
+            <table id="iat-iatTable" class="anomaly-table">
+              <thead>
+                <tr>
+                  <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="iat">IAT (°C) ↕</th>
+                  <th data-sort="maxIAT">Max IAT (°C) ↕</th>
+                  <th data-sort="rpm">RPM ↕</th>
+                  <th data-sort="throttle">Throttle (%) ↕</th>
+                  <th data-sort="load">Load (g/rev) ↕</th>
+                  <th data-sort="boost">Boost (kPa) ↕</th>
+                  <th data-sort="severity">Severity ↕</th>
+                  <th data-sort="thresholdStatus">Threshold ↕</th>
+                </tr>
+              </thead>
+              <tbody id="iat-iatTableBody">
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div id="loadingIndicator" class="loading" style="display: none;">
@@ -592,24 +945,61 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <script>
-    // Register zoom plugin immediately after loading
-    if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
-      Chart.register(zoomPlugin);
-      console.log('Zoom plugin registered');
-    } else {
-      console.warn('Chart.js or zoom plugin not available');
+    // Track script loading
+    let chartJsLoaded = false;
+    let zoomPluginLoaded = false;
+    
+    function tryRegisterZoomPlugin() {
+      if (chartJsLoaded && zoomPluginLoaded) {
+        if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
+          try {
+            Chart.register(zoomPlugin);
+            console.log('Zoom plugin registered successfully');
+          } catch (e) {
+            // Plugin might already be registered, which is fine
+            if (!e.message || (!e.message.includes('already registered') && !e.message.includes('already exists'))) {
+              console.warn('Error registering zoom plugin:', e);
+            }
+          }
+        } else {
+          console.warn('Chart.js or zoom plugin not available after both scripts loaded');
+        }
+      }
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" onload="chartJsLoaded = true; tryRegisterZoomPlugin();"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" onload="zoomPluginLoaded = true; tryRegisterZoomPlugin();"></script>
+  <script>
+    // Fallback: try to register after a short delay
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
+          try {
+            Chart.register(zoomPlugin);
+            console.log('Zoom plugin registered on DOMContentLoaded (fallback)');
+          } catch (e) {
+            // Plugin might already be registered, which is fine
+            if (!e.message || (!e.message.includes('already registered') && !e.message.includes('already exists'))) {
+              // Only warn if it's not already registered
+            }
+          }
+        }
+      }, 500);
+    });
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="../analysis/tuneFileParser.js"></script>
   <script src="../analysis/dataProcessor.js"></script>
   <script src="../analysis/knockDetector.js"></script>
   <script src="../analysis/boostControlAnalyzer.js"></script>
   <script src="../analysis/afrAnalyzer.js"></script>
   <script src="../analysis/fuelTrimAnalyzer.js"></script>
   <script src="../analysis/longTermFuelTrimAnalyzer.js"></script>
+  <script src="../analysis/iamAnalyzer.js"></script>
+  <script src="../analysis/loadLimitAnalyzer.js"></script>
+  <script src="../analysis/coolantTemperatureAnalyzer.js"></script>
+  <script src="../analysis/intakeAirTemperatureAnalyzer.js"></script>
   <script src="tabManager.js"></script>
   <script src="tabs/logScoreTab.js"></script>
   <script src="tabs/knockAnalysisTab.js"></script>
@@ -617,6 +1007,11 @@
   <script src="tabs/afrAnalysisTab.js"></script>
   <script src="tabs/fuelTrimTab.js"></script>
   <script src="tabs/longTermFuelTrimTab.js"></script>
+  <script src="tabs/iamAnalysisTab.js"></script>
+  <script src="tabs/loadLimitTab.js"></script>
+  <script src="tabs/coolantTemperatureTab.js"></script>
+  <script src="tabs/intakeAirTemperatureTab.js"></script>
+  <script src="tooltipConfig.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

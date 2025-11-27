@@ -53,6 +53,7 @@ window.applyDataSmoothing = function(dataArray, windowSize, enabled) {
 
 // DOM Elements
 const openFileBtn = document.getElementById('openFileBtn');
+const openTuneFileBtn = document.getElementById('openTuneFileBtn');
 const resetZoomBtn = document.getElementById('resetZoomBtn');
 const dropZone = document.getElementById('dropZone');
 const contentArea = document.getElementById('contentArea');
@@ -62,10 +63,214 @@ const loadingText = document.getElementById('loadingText');
 const progressBar = document.getElementById('progressBar');
 const loadingStatus = document.getElementById('loadingStatus');
 const fileName = document.getElementById('fileName');
+const tuneFileName = document.getElementById('tuneFileName');
 const contentLoadingOverlay = document.getElementById('contentLoadingOverlay');
 
+// Global tune file parser instance
+let tuneFileParser = null;
+window.tuneFileParser = null;
+
 // Initialize
+// Initialize dark mode
+function initializeDarkMode() {
+  // Load saved preference
+  const savedDarkMode = localStorage.getItem('darkMode') === 'true';
+  if (savedDarkMode) {
+    document.body.classList.add('dark-mode');
+  }
+  
+  // Listen for menu toggle
+  if (window.electronAPI && window.electronAPI.onToggleDarkMode) {
+    window.electronAPI.onToggleDarkMode(() => {
+      toggleDarkMode();
+    });
+  }
+}
+
+function toggleDarkMode() {
+  const isDark = document.body.classList.toggle('dark-mode');
+  localStorage.setItem('darkMode', isDark.toString());
+}
+
+// Initialize tooltip settings dialog
+function initializeTooltipSettings() {
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsModal = document.getElementById('closeSettingsModal');
+  const cancelTooltipSettings = document.getElementById('cancelTooltipSettings');
+  const saveTooltipSettings = document.getElementById('saveTooltipSettings');
+  const tooltipFieldsList = document.getElementById('tooltipFieldsList');
+  
+  if (!settingsModal || !tooltipFieldsList) {
+    return;
+  }
+  
+  // Listen for menu item click
+  if (window.electronAPI && window.electronAPI.onOpenTooltipSettings) {
+    window.electronAPI.onOpenTooltipSettings(() => {
+      console.log('Tooltip settings menu item clicked');
+      openTooltipSettings();
+    });
+  } else {
+    console.warn('electronAPI.onOpenTooltipSettings not available');
+  }
+  
+  // Close modal handlers
+  if (closeSettingsModal) {
+    closeSettingsModal.addEventListener('click', () => {
+      settingsModal.style.display = 'none';
+    });
+  }
+  
+  if (cancelTooltipSettings) {
+    cancelTooltipSettings.addEventListener('click', () => {
+      settingsModal.style.display = 'none';
+    });
+  }
+  
+  // Close on outside click
+  window.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+      settingsModal.style.display = 'none';
+    }
+  });
+  
+  // Save settings
+  if (saveTooltipSettings) {
+    saveTooltipSettings.addEventListener('click', () => {
+      saveTooltipSettingsChanges();
+      settingsModal.style.display = 'none';
+    });
+  }
+  
+  // Listen for tooltip settings changes to update charts
+  window.addEventListener('tooltipSettingsChanged', () => {
+    updateAllChartTooltips();
+  });
+}
+
+function openTooltipSettings() {
+  console.log('openTooltipSettings called');
+  const settingsModal = document.getElementById('settingsModal');
+  const tooltipFieldsList = document.getElementById('tooltipFieldsList');
+  
+  if (!settingsModal) {
+    console.error('Settings modal not found in DOM');
+    alert('Settings modal not found. Please refresh the page.');
+    return;
+  }
+  
+  if (!tooltipFieldsList) {
+    console.error('Tooltip fields list not found in DOM');
+    alert('Tooltip fields list not found. Please refresh the page.');
+    return;
+  }
+  
+  if (!window.TooltipConfig) {
+    console.error('TooltipConfig not available');
+    alert('Tooltip configuration system not loaded. Please refresh the page.');
+    return;
+  }
+  
+  console.log('Opening tooltip settings modal');
+  
+  // Update available fields from current log file
+  if (window.dataProcessor) {
+    const columns = window.dataProcessor.getColumns();
+    if (columns && Array.isArray(columns)) {
+      window.TooltipConfig.updateAvailableFields(columns);
+    }
+  }
+  
+  // Populate fields list
+  tooltipFieldsList.innerHTML = '';
+  
+  // Add default fields (always enabled, can't be disabled)
+  if (window.TooltipConfig.defaultFields && window.TooltipConfig.defaultFields.length > 0) {
+    window.TooltipConfig.defaultFields.forEach(fieldName => {
+      const item = createTooltipFieldItem(fieldName, true, true);
+      tooltipFieldsList.appendChild(item);
+    });
+  }
+  
+  // Add separator if there are other fields
+  if (window.TooltipConfig.availableFields && window.TooltipConfig.availableFields.length > 0) {
+    const separator = document.createElement('div');
+    separator.style.cssText = 'height: 1px; background: #ddd; margin: 10px 0;';
+    tooltipFieldsList.appendChild(separator);
+    
+    // Add other available fields
+    window.TooltipConfig.availableFields.forEach(fieldName => {
+      if (!window.TooltipConfig.defaultFields.includes(fieldName)) {
+        const isEnabled = window.TooltipConfig.isEnabled(fieldName);
+        const item = createTooltipFieldItem(fieldName, isEnabled, false);
+        tooltipFieldsList.appendChild(item);
+      }
+    });
+  } else {
+    // Show message if no log file is loaded
+    const noDataMsg = document.createElement('p');
+    noDataMsg.style.cssText = 'color: #666; font-style: italic; padding: 20px; text-align: center;';
+    noDataMsg.textContent = 'No log file loaded. Please load a log file first to see available fields.';
+    tooltipFieldsList.appendChild(noDataMsg);
+  }
+  
+  // Show modal
+  settingsModal.style.display = 'block';
+  console.log('Modal displayed');
+}
+
+function createTooltipFieldItem(fieldName, isEnabled, isDefault) {
+  const item = document.createElement('div');
+  item.className = 'tooltip-field-item';
+  
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = `tooltip-field-${fieldName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+  checkbox.checked = isEnabled;
+  checkbox.disabled = isDefault;
+  
+  const label = document.createElement('label');
+  label.htmlFor = checkbox.id;
+  label.textContent = fieldName;
+  if (isDefault) {
+    label.style.fontWeight = 'bold';
+    label.style.color = '#666';
+  }
+  
+  checkbox.addEventListener('change', () => {
+    if (!isDefault) {
+      window.TooltipConfig.toggleField(fieldName);
+    }
+  });
+  
+  item.appendChild(checkbox);
+  item.appendChild(label);
+  
+  return item;
+}
+
+function saveTooltipSettingsChanges() {
+  // Settings are already saved when toggled, just trigger update
+  window.TooltipConfig.notifyChange();
+}
+
+function updateAllChartTooltips() {
+  // Trigger re-render of all charts to update tooltips
+  if (window.tabManager) {
+    const activeTabId = window.tabManager.getActiveTab();
+    if (activeTabId) {
+      const tab = window.tabManager.tabs.get(activeTabId);
+      if (tab && tab.module && tab.module.renderCharts) {
+        // Re-render charts with preserved zoom
+        tab.module.renderCharts(true);
+      }
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialize dark mode first
+  initializeDarkMode();
   // Ensure all DOM elements are available
   if (!openFileBtn) {
     console.error('Open file button not found');
@@ -81,6 +286,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const afrAnalyzer = new AFRAnalyzer(null); // Will be set when data is loaded
   const fuelTrimAnalyzer = new FuelTrimAnalyzer(null); // Will be set when data is loaded
   const longTermFuelTrimAnalyzer = new LongTermFuelTrimAnalyzer(null); // Will be set when data is loaded
+  const iamAnalyzer = new IAMAnalyzer(null); // Will be set when data is loaded
+  const loadLimitAnalyzer = new LoadLimitAnalyzer(null); // Will be set when data is loaded
+  const coolantTemperatureAnalyzer = new CoolantTemperatureAnalyzer(null); // Will be set when data is loaded
+  const intakeAirTemperatureAnalyzer = new IntakeAirTemperatureAnalyzer(null); // Will be set when data is loaded
   
   tabManager.registerTab('logscore', LogScoreTab, null); // No analyzer needed
   tabManager.registerTab('knock', KnockAnalysisTab, knockDetector);
@@ -88,8 +297,20 @@ document.addEventListener('DOMContentLoaded', () => {
   tabManager.registerTab('afr', AFRAnalysisTab, afrAnalyzer);
   tabManager.registerTab('fueltrim', FuelTrimTab, fuelTrimAnalyzer);
   tabManager.registerTab('longtermfueltrim', LongTermFuelTrimTab, longTermFuelTrimAnalyzer);
+  tabManager.registerTab('iam', IAMAnalysisTab, iamAnalyzer);
+  tabManager.registerTab('loadlimit', LoadLimitTab, loadLimitAnalyzer);
+  tabManager.registerTab('coolanttemp', CoolantTemperatureTab, coolantTemperatureAnalyzer);
+  tabManager.registerTab('iat', IntakeAirTemperatureTab, intakeAirTemperatureAnalyzer);
   
   setupEventListeners();
+  
+  // Initially disable log file button until tune file is loaded
+  if (openFileBtn) {
+    openFileBtn.disabled = true;
+    openFileBtn.classList.remove('btn-primary');
+    openFileBtn.classList.add('btn-secondary');
+    openFileBtn.title = 'Please load a tune file first';
+  }
   
   // Set default active tab
   tabManager.switchTab('logscore');
@@ -105,6 +326,17 @@ function setupEventListeners() {
     });
   } else {
     console.error('Open file button not found during setup');
+  }
+
+  // Open tune file button
+  if (openTuneFileBtn) {
+    openTuneFileBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleOpenTuneFile();
+    });
+  } else {
+    console.warn('Open tune file button not found during setup');
   }
   
   // Reset zoom button - attach listener when button is available
@@ -158,6 +390,17 @@ function setupEventListeners() {
           tabManager.switchTab(tabId);
         }
       });
+    });
+  }
+  
+  // Initialize tooltip settings dialog
+  initializeTooltipSettings();
+  
+  // Add button click handler as fallback
+  const openTooltipSettingsBtn = document.getElementById('openTooltipSettingsBtn');
+  if (openTooltipSettingsBtn) {
+    openTooltipSettingsBtn.addEventListener('click', () => {
+      openTooltipSettings();
     });
   }
   
@@ -222,6 +465,12 @@ async function handleOpenFile() {
     return;
   }
 
+  // Check if tune file is loaded
+  if (!window.tuneFileParser || !window.tuneFileParser.isLoaded()) {
+    alert('Please load a tune file first before opening a log file.\n\nClick "Load Tune File" to select a tune file.');
+    return;
+  }
+
   try {
     const result = await window.electronAPI.openFileDialog();
     console.log('File dialog result:', result);
@@ -234,6 +483,105 @@ async function handleOpenFile() {
   } catch (error) {
     console.error('Error in handleOpenFile:', error);
     alert(`Error opening file: ${error.message}`);
+  }
+}
+
+async function handleOpenTuneFile() {
+  console.log('handleOpenTuneFile called');
+  
+  if (!window.electronAPI) {
+    alert('Electron API not available. Please run this application in Electron.');
+    return;
+  }
+
+  try {
+    const result = await window.electronAPI.openTuneFileDialog();
+    console.log('Tune file dialog result:', result);
+    
+    if (result && result.success) {
+      // Parse tune file
+      tuneFileParser = new TuneFileParser();
+      const parseSuccess = tuneFileParser.parse(result.content);
+      
+      if (parseSuccess && tuneFileParser.isLoaded()) {
+        window.tuneFileParser = tuneFileParser;
+        
+        // Update UI
+        if (tuneFileName) {
+          const fileName = result.path ? result.path.split(/[/\\]/).pop() : 'Tune file loaded';
+          tuneFileName.textContent = fileName;
+          tuneFileName.style.display = 'inline';
+        }
+        
+        // Enable log file button now that tune file is loaded
+        if (openFileBtn) {
+          openFileBtn.disabled = false;
+          openFileBtn.classList.remove('btn-secondary');
+          openFileBtn.classList.add('btn-primary');
+          openFileBtn.title = '';
+        }
+        
+        // Add green checkmark to tune file button
+        if (openTuneFileBtn) {
+          openTuneFileBtn.classList.add('btn-success');
+        }
+        
+        console.log('Tune file loaded successfully. Version:', tuneFileParser.getVersion());
+        console.log('Maps loaded:', tuneFileParser.maps.size);
+        
+        // If log file is already loaded, clear cache so analyzers can re-run with tune file
+        if (dataProcessor && dataProcessor.data && tabManager) {
+          console.log('Log file already loaded. Clear cache to re-run analysis with tune file.');
+          tabManager.clearCache();
+          // Re-run analysis for active tab
+          const activeTabId = tabManager.getActiveTab();
+          if (activeTabId) {
+            tabManager.switchTab(activeTabId);
+          }
+        }
+      } else {
+        alert('Error parsing tune file. Please ensure it is a valid JSON tune file.');
+        tuneFileParser = null;
+        window.tuneFileParser = null;
+        if (tuneFileName) {
+          tuneFileName.style.display = 'none';
+        }
+        // Keep log file button disabled if tune file failed to load
+        if (openFileBtn) {
+          openFileBtn.disabled = true;
+          openFileBtn.classList.remove('btn-primary', 'btn-success');
+          openFileBtn.classList.add('btn-secondary');
+          openFileBtn.title = 'Please load a tune file first';
+        }
+        
+        // Remove green checkmark from tune file button on error
+        if (openTuneFileBtn) {
+          openTuneFileBtn.classList.remove('btn-success');
+        }
+      }
+    } else if (result && !result.canceled) {
+      alert(`Error opening tune file: ${result.error || 'Unknown error'}`);
+    }
+  } catch (error) {
+    console.error('Error in handleOpenTuneFile:', error);
+    alert(`Error opening tune file: ${error.message}`);
+    tuneFileParser = null;
+    window.tuneFileParser = null;
+    if (tuneFileName) {
+      tuneFileName.style.display = 'none';
+    }
+    // Keep log file button disabled if tune file failed to load
+    if (openFileBtn) {
+      openFileBtn.disabled = true;
+      openFileBtn.classList.remove('btn-primary', 'btn-success');
+      openFileBtn.classList.add('btn-secondary');
+      openFileBtn.title = 'Please load a tune file first';
+    }
+    
+    // Remove green checkmark from tune file button on error
+    if (openTuneFileBtn) {
+      openTuneFileBtn.classList.remove('btn-success');
+    }
   }
 }
 
@@ -254,6 +602,12 @@ async function handleDrop(e) {
   e.stopPropagation();
   dropZone.classList.remove('drag-over');
   
+  // Check if tune file is loaded
+  if (!window.tuneFileParser || !window.tuneFileParser.isLoaded()) {
+    alert('Please load a tune file first before opening a log file.\n\nClick "Load Tune File" to select a tune file.');
+    return;
+  }
+  
   const files = e.dataTransfer.files;
   if (files.length > 0 && files[0].name.endsWith('.csv')) {
     const file = files[0];
@@ -272,6 +626,11 @@ async function handleDrop(e) {
 async function processFile(content, filePath) {
   try {
     console.log('processFile started');
+    
+    // Remove checkmark from log file button while processing
+    if (openFileBtn) {
+      openFileBtn.classList.remove('btn-success');
+    }
     
     // Show progress bar immediately (part of page, not modal)
     if (progressSection) {
@@ -294,6 +653,14 @@ async function processFile(content, filePath) {
     dataProcessor = new DataProcessor();
     // Make globally accessible
     window.dataProcessor = dataProcessor;
+    
+    // Update tooltip config with available fields
+    if (window.TooltipConfig && dataProcessor) {
+      const columns = dataProcessor.getColumns();
+      if (columns) {
+        window.TooltipConfig.updateAvailableFields(columns);
+      }
+    }
     
     // Create progress callback that safely handles errors
     const progressCallback = (progress) => {
@@ -329,6 +696,10 @@ async function processFile(content, filePath) {
     const afrAnalyzer = tabManager.getTabAnalyzer('afr');
     const fuelTrimAnalyzer = tabManager.getTabAnalyzer('fueltrim');
     const longTermFuelTrimAnalyzer = tabManager.getTabAnalyzer('longtermfueltrim');
+    const iamAnalyzer = tabManager.getTabAnalyzer('iam');
+    const loadLimitAnalyzer = tabManager.getTabAnalyzer('loadlimit');
+    const coolantTemperatureAnalyzer = tabManager.getTabAnalyzer('coolanttemp');
+    const intakeAirTemperatureAnalyzer = tabManager.getTabAnalyzer('iat');
     
     console.log('Setting dataProcessor on analyzers...');
     console.log('dataProcessor:', dataProcessor);
@@ -356,6 +727,25 @@ async function processFile(content, filePath) {
       longTermFuelTrimAnalyzer.dataProcessor = dataProcessor;
       console.log('✓ Set dataProcessor on longTermFuelTrimAnalyzer');
     }
+    if (iamAnalyzer) {
+      iamAnalyzer.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on iamAnalyzer');
+    }
+    if (loadLimitAnalyzer) {
+      loadLimitAnalyzer.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on loadLimitAnalyzer');
+    }
+    if (coolantTemperatureAnalyzer) {
+      coolantTemperatureAnalyzer.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on coolantTemperatureAnalyzer');
+    }
+    if (intakeAirTemperatureAnalyzer) {
+      intakeAirTemperatureAnalyzer.dataProcessor = dataProcessor;
+      console.log('✓ Set dataProcessor on intakeAirTemperatureAnalyzer');
+    }
+    
+    // Make knockDetector globally accessible for IAM correlation
+    window.knockDetector = knockDetector;
     
     // Run knock analysis
     updateProgress(50, 'Detecting knock events...');
@@ -445,7 +835,87 @@ async function processFile(content, filePath) {
       console.error('Long term fuel trim analyzer not available');
     }
     
-    updateProgress(70, 'Analysis complete');
+    // Run IAM analysis
+    updateProgress(70, 'Analyzing IAM...');
+    if (iamAnalyzer) {
+      const iamAnalysis = iamAnalyzer.analyze();
+      console.log('IAM analysis complete:', iamAnalysis ? 'success' : 'failed');
+      if (iamAnalysis) {
+        console.log('IAM analysis results:', {
+          events: iamAnalysis.events?.length || 0,
+          hasStats: !!iamAnalysis.statistics,
+          hasColumns: !!iamAnalysis.columns,
+          error: iamAnalysis.error
+        });
+        tabManager.cache.set('iam', iamAnalysis);
+      } else {
+        console.error('IAM analysis returned null');
+      }
+    } else {
+      console.error('IAM analyzer not available');
+    }
+    
+    // Run load limit analysis
+    updateProgress(72, 'Analyzing load limits...');
+    if (loadLimitAnalyzer) {
+      const loadLimitAnalysis = loadLimitAnalyzer.analyze();
+      console.log('Load limit analysis complete:', loadLimitAnalysis ? 'success' : 'failed');
+      if (loadLimitAnalysis) {
+        console.log('Load limit analysis results:', {
+          events: loadLimitAnalysis.events?.length || 0,
+          hasStats: !!loadLimitAnalysis.statistics,
+          hasColumns: !!loadLimitAnalysis.columns,
+          error: loadLimitAnalysis.error
+        });
+        tabManager.cache.set('loadlimit', loadLimitAnalysis);
+      } else {
+        console.error('Load limit analysis returned null');
+      }
+    } else {
+      console.error('Load limit analyzer not available');
+    }
+    
+    // Run coolant temperature analysis
+    updateProgress(74, 'Analyzing coolant temperature...');
+    if (coolantTemperatureAnalyzer) {
+      const coolantTempAnalysis = coolantTemperatureAnalyzer.analyze();
+      console.log('Coolant temperature analysis complete:', coolantTempAnalysis ? 'success' : 'failed');
+      if (coolantTempAnalysis) {
+        console.log('Coolant temperature analysis results:', {
+          events: coolantTempAnalysis.events?.length || 0,
+          hasStats: !!coolantTempAnalysis.statistics,
+          hasColumns: !!coolantTempAnalysis.columns,
+          error: coolantTempAnalysis.error
+        });
+        tabManager.cache.set('coolanttemp', coolantTempAnalysis);
+      } else {
+        console.error('Coolant temperature analysis returned null');
+      }
+    } else {
+      console.error('Coolant temperature analyzer not available');
+    }
+    
+    // Run intake air temperature analysis
+    updateProgress(74, 'Analyzing intake air temperature...');
+    if (intakeAirTemperatureAnalyzer) {
+      const iatAnalysis = intakeAirTemperatureAnalyzer.analyze();
+      console.log('Intake air temperature analysis complete:', iatAnalysis ? 'success' : 'failed');
+      if (iatAnalysis) {
+        console.log('Intake air temperature analysis results:', {
+          events: iatAnalysis.events?.length || 0,
+          hasStats: !!iatAnalysis.statistics,
+          hasColumns: !!iatAnalysis.columns,
+          error: iatAnalysis.error
+        });
+        tabManager.cache.set('iat', iatAnalysis);
+      } else {
+        console.error('Intake air temperature analysis returned null');
+      }
+    } else {
+      console.error('Intake air temperature analyzer not available');
+    }
+    
+    updateProgress(75, 'Analysis complete');
     
     // Step 3: Update UI (10% of progress)
     console.log('Updating UI...');
@@ -486,6 +956,11 @@ async function processFile(content, filePath) {
     // Complete
     console.log('File processing complete!');
     updateProgress(100, 'Complete!');
+    
+    // Add green checkmark to log file button
+    if (openFileBtn) {
+      openFileBtn.classList.add('btn-success');
+    }
     
     // Remove loading state from content area
     if (contentArea) {

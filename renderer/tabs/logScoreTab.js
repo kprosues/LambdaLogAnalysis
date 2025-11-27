@@ -103,18 +103,23 @@ const LogScoreTab = {
         if (event.eventType !== 'normal') {
           const isOvershoot = event.eventType === 'overshoot';
           const errorText = isOvershoot ? 'Overshoot' : 'Undershoot';
-          const boostTarget = (event.boostTarget !== undefined && event.boostTarget !== null) ? event.boostTarget.toFixed(2) : 'N/A';
-          const actualBoost = (event.actualBoost !== undefined && event.actualBoost !== null) ? event.actualBoost.toFixed(2) : 'N/A';
+          const boostTarget = (event.boostTarget !== undefined && event.boostTarget !== null) ? event.boostTarget : 0;
+          const actualBoost = (event.actualBoost !== undefined && event.actualBoost !== null) ? event.actualBoost : 0;
           const boostError = (event.boostError !== undefined && event.boostError !== null) ? event.boostError : 0;
+          // Convert kPa to PSI (1 kPa = 0.1450377377 PSI)
+          const kPaToPSI = (kpa) => kpa * 0.1450377377;
+          const boostTargetPSI = boostTarget > 0 ? kPaToPSI(boostTarget).toFixed(2) : 'N/A';
+          const actualBoostPSI = actualBoost > 0 ? kPaToPSI(actualBoost).toFixed(2) : 'N/A';
+          const boostErrorPSI = kPaToPSI(Math.abs(boostError));
           this.compiledIssues.push({
             time: event.time || 0,
             source: 'Boost Control',
             sourceId: 'boost',
             eventType: errorText,
             severity: isOvershoot ? 'high' : 'low',
-            value: boostError,
-            valueUnit: 'kPa',
-            description: `Boost ${errorText.toLowerCase()}: ${Math.abs(boostError).toFixed(2)} kPa error (target: ${boostTarget} kPa, actual: ${actualBoost} kPa)`,
+            value: boostErrorPSI,
+            valueUnit: 'PSI',
+            description: `Boost ${errorText.toLowerCase()}: ${boostErrorPSI.toFixed(2)} PSI error (target: ${boostTargetPSI} PSI, actual: ${actualBoostPSI} PSI)`,
             originalEvent: event
           });
         }
@@ -138,10 +143,13 @@ const LogScoreTab = {
           const targetAFR = targetLambda > 0 ? targetLambda * AFR_CONVERSION_FACTOR : 0;
           const measuredAFR = measuredLambda > 0 ? measuredLambda * AFR_CONVERSION_FACTOR : 0;
           
-          // Calculate percentage deviation from target (using lambda values for accuracy)
+          // Calculate error as the difference between converted values (to match AFR tab)
+          const errorAFR = measuredAFR - targetAFR;
+          
+          // Calculate percentage deviation from target using converted AFR values
           let percentDeviation = 0;
-          if (targetLambda > 0 && !isNaN(targetLambda) && !isNaN(afrError)) {
-            percentDeviation = (afrError / targetLambda) * 100;
+          if (targetAFR > 0 && !isNaN(targetAFR) && !isNaN(errorAFR)) {
+            percentDeviation = (errorAFR / targetAFR) * 100;
           }
           
           // Calculate severity based on percentage deviation for lean events
@@ -213,6 +221,104 @@ const LogScoreTab = {
       });
     }
 
+    // 6. Get IAM events
+    const iamData = tabManager ? tabManager.getCachedAnalysis('iam') : null;
+    if (iamData && iamData.events && Array.isArray(iamData.events)) {
+      iamData.events.forEach(event => {
+        if (event.eventType !== 'normal') {
+          const iam = (event.iam !== undefined && event.iam !== null) ? event.iam : 0;
+          const iamPercent = iam * 100;
+          const severity = event.severity === 'critical' ? 'severe' : (event.severity === 'severe' ? 'high' : 'low');
+          const eventType = event.eventType === 'stuck_low' ? 'IAM Stuck Low' : 'IAM Drop';
+          this.compiledIssues.push({
+            time: event.time || 0,
+            source: 'IAM Analysis',
+            sourceId: 'iam',
+            eventType: eventType,
+            severity: severity,
+            value: iamPercent,
+            valueUnit: '%',
+            description: `${eventType}: IAM dropped to ${iamPercent.toFixed(1)}% (${event.severity} severity)`,
+            originalEvent: event
+          });
+        }
+      });
+    }
+
+    // 7. Get Load Limit events
+    const loadLimitData = tabManager ? tabManager.getCachedAnalysis('loadlimit') : null;
+    if (loadLimitData && loadLimitData.events && Array.isArray(loadLimitData.events)) {
+      loadLimitData.events.forEach(event => {
+        if (event.eventType !== 'normal') {
+          const load = (event.load !== undefined && event.load !== null) ? event.load : 0;
+          const loadLimit = (event.loadLimit !== undefined && event.loadLimit !== null) ? event.loadLimit : 0;
+          const loadRatio = (event.loadRatio !== undefined && event.loadRatio !== null) ? event.loadRatio : 0;
+          const severity = event.severity === 'critical' ? 'severe' : (event.severity === 'severe' ? 'high' : 'low');
+          const eventType = event.eventType === 'limit_violation' ? 'Load Limit Violation' : 'Near Load Limit';
+          const fuelCutText = event.fuelCut ? ' (Fuel Cut Active)' : '';
+          this.compiledIssues.push({
+            time: event.time || 0,
+            source: 'Load Limit',
+            sourceId: 'loadlimit',
+            eventType: eventType,
+            severity: severity,
+            value: load,
+            valueUnit: 'g/rev',
+            description: `${eventType}: Load ${load.toFixed(2)} g/rev exceeds limit ${loadLimit.toFixed(2)} g/rev (${(loadRatio * 100).toFixed(1)}%)${fuelCutText}`,
+            originalEvent: event
+          });
+        }
+      });
+    }
+
+    // 8. Get Coolant Temperature events
+    const coolantTempData = tabManager ? tabManager.getCachedAnalysis('coolanttemp') : null;
+    if (coolantTempData && coolantTempData.events && Array.isArray(coolantTempData.events)) {
+      coolantTempData.events.forEach(event => {
+        if (event.eventType !== 'normal') {
+          const coolantTemp = (event.coolantTemp !== undefined && event.coolantTemp !== null) ? event.coolantTemp : 0;
+          const severity = event.severity === 'critical' ? 'severe' : (event.severity === 'severe' ? 'high' : (event.severity === 'moderate' ? 'moderate' : 'low'));
+          const eventType = event.eventType === 'high_temp' ? 'High Temperature' : 'Elevated Temperature';
+          const fanStatus = event.aboveHighSpeedFan ? ' (High Speed Fan)' : '';
+          this.compiledIssues.push({
+            time: event.time || 0,
+            source: 'Coolant Temperature',
+            sourceId: 'coolanttemp',
+            eventType: eventType,
+            severity: severity,
+            value: coolantTemp,
+            valueUnit: '°C',
+            description: `${eventType}: ${coolantTemp.toFixed(1)}°C${fanStatus}`,
+            originalEvent: event
+          });
+        }
+      });
+    }
+
+    // 9. Get Intake Air Temperature events
+    const iatData = tabManager ? tabManager.getCachedAnalysis('iat') : null;
+    if (iatData && iatData.events && Array.isArray(iatData.events)) {
+      iatData.events.forEach(event => {
+        if (event.eventType !== 'normal') {
+          const iat = (event.iat !== undefined && event.iat !== null) ? event.iat : 0;
+          const severity = event.severity === 'critical' ? 'severe' : (event.severity === 'severe' ? 'high' : (event.severity === 'moderate' ? 'moderate' : (event.severity === 'mild' ? 'low' : 'low')));
+          const eventType = event.eventType === 'high_temp' ? 'High IAT' : 'Low IAT';
+          const thresholdStatus = event.aboveHighThreshold ? ' (Above High Threshold)' : (event.belowLowThreshold ? ' (Below Low Threshold)' : '');
+          this.compiledIssues.push({
+            time: event.time || 0,
+            source: 'Intake Air Temperature',
+            sourceId: 'iat',
+            eventType: eventType,
+            severity: severity,
+            value: iat,
+            valueUnit: '°C',
+            description: `${eventType}: ${iat.toFixed(1)}°C${thresholdStatus}`,
+            originalEvent: event
+          });
+        }
+      });
+    }
+
     // Sort by time by default
     this.compiledIssues.sort((a, b) => a.time - b.time);
   },
@@ -222,8 +328,10 @@ const LogScoreTab = {
     const criticalIssues = this.compiledIssues.filter(issue => 
       issue.severity === 'severe' || 
       (issue.sourceId === 'knock' && issue.severity === 'high') ||
-      (issue.sourceId === 'boost' && Math.abs(issue.value) > 10) ||
-      (issue.sourceId === 'afr' && issue.severity === 'high' && Math.abs(issue.value) > 0.1)
+      (issue.sourceId === 'boost' && issue.valueUnit === 'PSI' && Math.abs(issue.value) > 1.45) || // 10 kPa = 1.45 PSI
+      (issue.sourceId === 'afr' && issue.severity === 'high' && Math.abs(issue.value) > 0.1) ||
+      (issue.sourceId === 'iam' && (issue.severity === 'severe' || issue.severity === 'high')) ||
+      (issue.sourceId === 'loadlimit' && issue.eventType === 'Load Limit Violation')
     ).length;
 
     // Count by category
@@ -274,6 +382,10 @@ const LogScoreTab = {
         if (eventTypeFilter === 'rich') return issue.eventType === 'Rich';
         if (eventTypeFilter === 'positive') return issue.eventType === 'Positive Trim';
         if (eventTypeFilter === 'negative') return issue.eventType === 'Negative Trim';
+        if (eventTypeFilter === 'iam') return issue.eventType === 'IAM Drop' || issue.eventType === 'IAM Stuck Low';
+        if (eventTypeFilter === 'loadlimit') return issue.eventType === 'Load Limit Violation' || issue.eventType === 'Near Load Limit';
+        if (eventTypeFilter === 'coolanttemp') return issue.eventType === 'High Temperature' || issue.eventType === 'Elevated Temperature';
+        if (eventTypeFilter === 'iat') return issue.eventType === 'High IAT' || issue.eventType === 'Low IAT';
         return true;
       });
     }
@@ -284,8 +396,12 @@ const LogScoreTab = {
         if (severityFilter === 'critical') {
           return issue.severity === 'severe' || 
                  (issue.sourceId === 'knock' && issue.severity === 'high') ||
-                 (issue.sourceId === 'boost' && Math.abs(issue.value) > 10) ||
-                 (issue.sourceId === 'afr' && issue.severity === 'high' && Math.abs(issue.value) > 0.1);
+                 (issue.sourceId === 'boost' && issue.valueUnit === 'PSI' && Math.abs(issue.value) > 1.45) || // 10 kPa = 1.45 PSI
+                 (issue.sourceId === 'afr' && issue.severity === 'high' && Math.abs(issue.value) > 0.1) ||
+                 (issue.sourceId === 'iam' && (issue.severity === 'severe' || issue.severity === 'high')) ||
+                 (issue.sourceId === 'loadlimit' && issue.eventType === 'Load Limit Violation') ||
+                 (issue.sourceId === 'coolanttemp' && (issue.severity === 'severe' || issue.severity === 'high')) ||
+                 (issue.sourceId === 'iat' && (issue.severity === 'severe' || issue.severity === 'high'));
         }
         return issue.severity === severityFilter;
       });
@@ -431,9 +547,10 @@ const LogScoreTab = {
       this.currentSort.direction = 'asc';
     }
 
-    // Update sort indicators in table headers
+    // Update sort indicators in table headers - remove all existing arrows first using regex
     document.querySelectorAll('#logscore-issuesTable th[data-sort]').forEach(th => {
-      th.textContent = th.textContent.replace(/ ↑| ↓/, ''); // Remove existing indicators
+      // Remove all arrow indicators (may be multiple if bug occurred)
+      th.textContent = th.textContent.replace(/ ↑+| ↓+/g, '');
       if (th.dataset.sort === column) {
         th.textContent += this.currentSort.direction === 'asc' ? ' ↑' : ' ↓';
       }

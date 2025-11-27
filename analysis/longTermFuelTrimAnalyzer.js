@@ -79,6 +79,15 @@ class LongTermFuelTrimAnalyzer {
         return;
       }
 
+      const rpm = row['Engine Speed (rpm)'] || 0;
+      const throttle = row['Throttle Position (%)'] || 0;
+      const load = row['Load (MAF) (g/rev)'] || 0;
+      const ect = row['Coolant Temperature (°C)'] || 0;
+      const iat = row['Intake Air Temperature (°C)'] || 0;
+
+      // Note: LTFT is still applied during PE mode (unlike STFT)
+      // So we don't filter out PE mode events
+
       validDataPointCount++;
 
       // Track statistics
@@ -101,11 +110,33 @@ class LongTermFuelTrimAnalyzer {
       // Positive = adding fuel (rich condition, ECU trying to lean out)
       // Negative = removing fuel (lean condition, ECU trying to enrich)
       let eventType = 'normal';
+      let severity = 'normal';
+      
+      // Check trim limits (stricter for LTFT - 5% threshold, but same limits)
+      const trimLimitWarning = 20.0; // Approaching ECU limits
+      const trimLimitMax = 25.0; // ECU limit reached
+      
       if (longTermTrim > this.abnormalThreshold) {
-        eventType = 'positive'; // Positive trim (adding fuel, rich condition)
+        eventType = 'positive';
+        if (longTermTrim >= trimLimitMax) {
+          severity = 'critical'; // At or above ECU limit
+        } else if (longTermTrim >= trimLimitWarning) {
+          severity = 'severe'; // Approaching limit
+        }
       } else if (longTermTrim < -this.abnormalThreshold) {
-        eventType = 'negative'; // Negative trim (removing fuel, lean condition)
+        eventType = 'negative';
+        if (longTermTrim <= -trimLimitMax) {
+          severity = 'critical'; // At or below ECU limit
+        } else if (longTermTrim <= -trimLimitWarning) {
+          severity = 'severe'; // Approaching limit
+        }
       }
+
+      // Check if high trim is expected (compensation-aware)
+      // High trim during cold start may be expected
+      const isColdStart = ect < 60; // Below 60°C is cold
+      // High trim during acceleration may be expected
+      const isAcceleration = throttle > 50 && load > 1.0;
 
       // Create events for abnormal conditions (exceeding +/- 5%)
       if (eventType !== 'normal') {
@@ -113,11 +144,16 @@ class LongTermFuelTrimAnalyzer {
           index: index,
           time: time,
           longTermTrim: longTermTrim,
-          rpm: row['Engine Speed (rpm)'] || 0,
-          throttle: row['Throttle Position (%)'] || 0,
-          load: row['Load (MAF) (g/rev)'] || 0,
+          rpm: rpm,
+          throttle: throttle,
+          load: load,
           afr: row['Air/Fuel Sensor #1 (λ)'] || 0,
-          eventType: eventType
+          eventType: eventType,
+          severity: severity,
+          isColdStart: isColdStart,
+          isAcceleration: isAcceleration,
+          ect: ect,
+          iat: iat
         });
       }
     });
@@ -232,6 +268,9 @@ class LongTermFuelTrimAnalyzer {
       load: avgLoad,
       afr: avgAfr,
       eventType: mostSevereEvent.eventType,
+      severity: mostSevereEvent.severity || 'normal',
+      isColdStart: eventGroup.some(e => e.isColdStart === true),
+      isAcceleration: eventGroup.some(e => e.isAcceleration === true),
       eventCount: eventGroup.length // Number of data points in this grouped event
     };
   }

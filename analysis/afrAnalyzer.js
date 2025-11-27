@@ -3,10 +3,15 @@ class AFRAnalyzer {
   constructor(dataProcessor) {
     this.dataProcessor = dataProcessor;
     this.analysisResults = null;
-    this.leanThreshold = 0.05; // λ above target (measured > target)
-    this.richThreshold = -0.05; // λ below target (measured < target)
+    this.leanThreshold = 0.05; // λ above target (measured > target) - closed-loop
+    this.richThreshold = -0.05; // λ below target (measured < target) - closed-loop
     this.targetTolerance = 0.02; // λ tolerance for "in target" range (±0.02 λ)
     this.groupingTimeWindow = 1.0; // Group events within 1.0 seconds (1000ms)
+    
+    // PE mode thresholds (stricter for open-loop operation)
+    this.peLeanThreshold = 0.03; // λ above target in PE mode
+    this.peRichThreshold = -0.03; // λ below target in PE mode
+    this.peTargetTolerance = 0.015; // λ tolerance in PE mode (±0.015 λ)
   }
 
   analyze() {
@@ -114,12 +119,30 @@ class AFRAnalyzer {
 
       validDataPointCount++;
 
-      // Get throttle position (needed for filtering)
-      const throttle = row['Throttle Position (%)'] || 0;
+      // Get throttle position, RPM, and load (needed for filtering and PE mode detection)
+      const throttle = parseFloat(row['Throttle Position (%)']) || 0;
+      const rpm = parseFloat(row['Engine Speed (rpm)']) || 0;
+      const load = parseFloat(row['Load (MAF) (g/rev)']) || 0;
 
-      // Count data points that meet "time in target" criteria (throttle >= 15%)
-      if (throttle >= 15) {
-        validDataPointCountForTimeInTarget++;
+      // Early exit: Skip all AFR error events at very low throttle (< 10%) unless it's a target mismatch
+      // This must be checked early, before calculating error and determining event type
+      // We'll check for target mismatch after PE mode detection, but filter lean/rich events here
+      let isPEMode = false;
+      let expectedPETarget = null;
+      let targetMismatch = false;
+      
+      if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+        isPEMode = window.tuneFileParser.isPEModeActive(rpm, load, throttle);
+        
+        if (isPEMode) {
+          // Calculate expected PE target (use pe_initial for now, could check IAM for pe_safe)
+          expectedPETarget = window.tuneFileParser.getPETarget(rpm, load, 'initial');
+          
+          // Check if logged target matches expected target (within tolerance)
+          if (expectedPETarget && Math.abs(targetAFR - expectedPETarget) > 0.01) {
+            targetMismatch = true;
+          }
+        }
       }
 
       // Calculate AFR error: measured - target
@@ -128,12 +151,54 @@ class AFRAnalyzer {
       const afrError = measuredAFR - targetAFR;
       const afrErrorPercent = targetAFR > 0 ? (afrError / targetAFR) * 100 : 0;
 
+      // Use different thresholds for PE mode vs closed-loop
+      const leanThreshold = isPEMode ? this.peLeanThreshold : this.leanThreshold;
+      const richThreshold = isPEMode ? this.peRichThreshold : this.richThreshold;
+      const targetTolerance = isPEMode ? this.peTargetTolerance : this.targetTolerance;
+
+      // Determine event type based on error magnitude
+      // Use stricter thresholds for PE mode, but still detect in closed-loop
+      let eventType = 'normal';
+      if (afrError > leanThreshold) {
+        eventType = 'lean';
+      } else if (afrError < richThreshold) {
+        eventType = 'rich';
+      }
+
+      // Skip all events at very low throttle (< 10%) unless it's a target mismatch
+      // Low throttle events are often idle/neutral and less meaningful, regardless of error size
+      // This check must happen before creating any events
+      if (throttle < 10 && !targetMismatch) {
+        // Still track statistics for these points, but don't create events
+        totalError += afrError;
+        totalErrorAbs += Math.abs(afrError);
+        
+        // Only count "in target" for points with throttle >= 15%
+        if (Math.abs(afrError) <= targetTolerance && throttle >= 15) {
+          inTargetCount++;
+        }
+        
+        if (afrError > maxLean) {
+          maxLean = afrError;
+        }
+        if (afrError < maxRich) {
+          maxRich = afrError;
+        }
+        
+        return; // Continue to next iteration without adding event
+      }
+
+      // Count data points that meet "time in target" criteria (throttle >= 15%)
+      if (throttle >= 15) {
+        validDataPointCountForTimeInTarget++;
+      }
+
       // Track statistics
       totalError += afrError;
       totalErrorAbs += Math.abs(afrError);
       
       // Only count "in target" for points with throttle >= 15%
-      if (Math.abs(afrError) <= this.targetTolerance && throttle >= 15) {
+      if (Math.abs(afrError) <= targetTolerance && throttle >= 15) {
         inTargetCount++;
       }
 
@@ -144,22 +209,15 @@ class AFRAnalyzer {
         maxRich = afrError;
       }
 
-      // Determine event type
-      let eventType = 'normal';
-      if (afrError > this.leanThreshold) {
-        eventType = 'lean';
-      } else if (afrError < this.richThreshold) {
-        eventType = 'rich';
-      }
+      // Create events for lean/rich conditions, significant deviations, or target mismatches
+      // Suppress events that deviate 7% or less from target (unless it's a target mismatch)
+      const isSignificantDeviation = eventType !== 'normal' || Math.abs(afrError) > targetTolerance;
+      const meetsMinimumDeviation = Math.abs(afrErrorPercent) > 7.0;
+      
+      // Always create target mismatch events, but for other events require > 7% deviation
+      const shouldCreateEvent = targetMismatch || (isSignificantDeviation && meetsMinimumDeviation);
 
-      // Create events for lean/rich conditions or significant deviations
-      // Skip lean or rich events when throttle position is less than 15%
-      if (eventType !== 'normal' || Math.abs(afrError) > this.targetTolerance) {
-        // Skip lean or rich events at low throttle (< 15%)
-        if ((eventType === 'lean' || eventType === 'rich') && throttle < 15) {
-          return; // Continue to next iteration without adding event
-        }
-
+      if (shouldCreateEvent) {
         events.push({
           index: index,
           time: time,
@@ -167,10 +225,13 @@ class AFRAnalyzer {
           measuredAFR: measuredAFR,
           afrError: afrError,
           afrErrorPercent: afrErrorPercent,
-          rpm: row['Engine Speed (rpm)'] || 0,
+          rpm: rpm,
           throttle: throttle,
-          load: row['Load (MAF) (g/rev)'] || 0,
-          eventType: eventType
+          load: load,
+          eventType: targetMismatch ? 'target_mismatch' : eventType,
+          isPEMode: isPEMode,
+          expectedPETarget: expectedPETarget,
+          targetMismatch: targetMismatch
         });
       }
     });
@@ -195,6 +256,8 @@ class AFRAnalyzer {
         inTargetPercent: inTargetPercent,
         leanEvents: groupedEvents.filter(e => e.eventType === 'lean').length,
         richEvents: groupedEvents.filter(e => e.eventType === 'rich').length,
+        pemodeEvents: groupedEvents.filter(e => e.isPEMode === true).length,
+        targetMismatchEvents: groupedEvents.filter(e => e.targetMismatch === true).length,
         timeRange: this.dataProcessor ? this.dataProcessor.getTimeRange() : { min: 0, max: 0 }
       },
       columns: {
@@ -267,27 +330,29 @@ class AFRAnalyzer {
       return Math.abs(current.afrError) > Math.abs(prev.afrError) ? current : prev;
     });
 
-    // Calculate averages for other metrics
-    const avgTargetAFR = eventGroup.reduce((sum, e) => sum + e.targetAFR, 0) / eventGroup.length;
-    const avgMeasuredAFR = eventGroup.reduce((sum, e) => sum + e.measuredAFR, 0) / eventGroup.length;
+    // Use the start time of the group
+    const startTime = eventGroup[0].time;
+    const endTime = eventGroup[eventGroup.length - 1].time;
+    const duration = endTime - startTime;
+    
+    // Use the actual values from the event at the start time (to match chart display)
+    // This ensures table values match what's shown in the chart at that time
+    const startEvent = eventGroup[0];
+    
+    // Calculate averages for statistics/metrics that benefit from averaging
     const avgAFRError = eventGroup.reduce((sum, e) => sum + e.afrError, 0) / eventGroup.length;
     const avgAFRErrorPercent = eventGroup.reduce((sum, e) => sum + e.afrErrorPercent, 0) / eventGroup.length;
     const avgRpm = eventGroup.reduce((sum, e) => sum + e.rpm, 0) / eventGroup.length;
     const avgThrottle = eventGroup.reduce((sum, e) => sum + e.throttle, 0) / eventGroup.length;
     const avgLoad = eventGroup.reduce((sum, e) => sum + e.load, 0) / eventGroup.length;
 
-    // Use the start time of the group
-    const startTime = eventGroup[0].time;
-    const endTime = eventGroup[eventGroup.length - 1].time;
-    const duration = endTime - startTime;
-
     return {
       index: mostSevereEvent.index,
       time: startTime, // Start time of the event group
       endTime: endTime, // End time of the event group
       duration: duration, // Duration of the event group
-      targetAFR: avgTargetAFR,
-      measuredAFR: avgMeasuredAFR,
+      targetAFR: startEvent.targetAFR, // Use actual value at start time (matches chart)
+      measuredAFR: startEvent.measuredAFR, // Use actual value at start time (matches chart)
       afrError: mostSevereEvent.afrError, // Use most severe error
       maxAFRError: Math.max(...eventGroup.map(e => Math.abs(e.afrError))) * (mostSevereEvent.afrError < 0 ? -1 : 1), // Most severe error with sign
       avgAFRError: avgAFRError,

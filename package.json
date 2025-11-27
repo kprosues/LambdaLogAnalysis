@@ -1,7 +1,7 @@
 {
   "name": "ecu-log-analysis-tool",
-  "version": "1.3.0",
-  "description": "Desktop application for analyzing ECU log files and detecting anomalies",
+  "version": "1.4.0",
+  "description": "Desktop application for analyzing ProjectLambda Subaru WRX STi log files and detecting anomalies",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
