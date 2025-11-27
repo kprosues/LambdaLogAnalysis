@@ -244,6 +244,9 @@ const FuelTrimTab = {
     const columns = analysisData.columns;
     const times = data.map(row => row['Time (s)']);
     
+    // Get RPM data for tooltips
+    const rpms = data.map(row => parseFloat(row['Engine Speed (rpm)']) || 0);
+    
     const breakAtGaps = (dataArray, timeArray) => {
       const result = [...dataArray];
       for (let i = 1; i < timeArray.length; i++) {
@@ -301,7 +304,20 @@ const FuelTrimTab = {
         },
         tooltip: {
           mode: 'index',
-          intersect: false
+          intersect: false,
+          callbacks: {
+            footer: (tooltipItems) => {
+              // Use TooltipConfig to get footer text
+              if (tooltipItems.length > 0 && window.TooltipConfig && window.dataProcessor) {
+                const dataIndex = tooltipItems[0].dataIndex;
+                const data = window.dataProcessor.getData();
+                if (data && dataIndex >= 0 && dataIndex < data.length) {
+                  return window.TooltipConfig.getTooltipFooter(dataIndex, data);
+                }
+              }
+              return '';
+            }
+          }
         },
         zoom: {
           zoom: {
@@ -631,8 +647,10 @@ const FuelTrimTab = {
       this.currentSort.direction = 'asc';
     }
     
+    // Update sort indicators - remove all existing arrows first using regex
     document.querySelectorAll('#fueltrim-fuelTrimTable th').forEach(th => {
-      th.textContent = th.textContent.replace(' ↑', '').replace(' ↓', '');
+      // Remove all arrow indicators (may be multiple if bug occurred)
+      th.textContent = th.textContent.replace(/ ↑+| ↓+/g, '');
       if (th.dataset.sort === column) {
         th.textContent += this.currentSort.direction === 'asc' ? ' ↑' : ' ↓';
       }

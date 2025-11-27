@@ -3,10 +3,43 @@ class BoostControlAnalyzer {
   constructor(dataProcessor) {
     this.dataProcessor = dataProcessor;
     this.analysisResults = null;
-    this.overshootThreshold = 5.0; // kPa above target
-    this.undershootThreshold = -5.0; // kPa below target
+    this.overshootThreshold = 5.0; // kPa above target (moderate threshold)
+    this.undershootThreshold = -5.0; // kPa below target (moderate threshold)
     this.targetTolerance = 10.0; // kPa tolerance for "in target" range (±10 kPa)
     this.groupingTimeWindow = 0.5; // Group events within 0.5 seconds (500ms)
+    
+    // Multi-tier error thresholds from boost_error_index
+    this.errorThresholds = [20.3, 11.7, 5.3, 2.1]; // Critical, Severe, Moderate, Mild
+    
+    // Load tune file parameters if available
+    this.loadTuneFileParameters();
+  }
+
+  loadTuneFileParameters() {
+    if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+      this.errorThresholds = window.tuneFileParser.getBoostErrorIndex();
+    }
+  }
+
+  /**
+   * Classify boost error severity based on error thresholds
+   * @param {number} error - Boost error in kPa (positive = overboost, negative = undershoot)
+   * @returns {string} - Severity: 'critical', 'severe', 'moderate', 'mild', or 'normal'
+   */
+  classifyErrorSeverity(error) {
+    const absError = Math.abs(error);
+    
+    if (absError > this.errorThresholds[0]) {
+      return 'critical';
+    } else if (absError > this.errorThresholds[1]) {
+      return 'severe';
+    } else if (absError > this.errorThresholds[2]) {
+      return 'moderate';
+    } else if (absError > this.errorThresholds[3]) {
+      return 'mild';
+    } else {
+      return 'normal';
+    }
   }
 
   analyze() {
@@ -184,8 +217,19 @@ class BoostControlAnalyzer {
         wastegateCount++;
       }
 
-      // Get throttle position
+      // Get throttle position and RPM
       const throttle = row['Throttle Position (%)'] || 0;
+      const rpm = row['Engine Speed (rpm)'] || 0;
+      
+      // Check boost limit violation (RPM-based)
+      let boostLimitViolation = false;
+      let boostLimit = null;
+      if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+        boostLimit = window.tuneFileParser.getBoostLimit(rpm);
+        if (actualBoost > boostLimit) {
+          boostLimitViolation = true;
+        }
+      }
       
       // Determine event type
       let eventType = 'normal';
@@ -194,18 +238,41 @@ class BoostControlAnalyzer {
       } else if (boostError < this.undershootThreshold) {
         eventType = 'undershoot';
       }
+      
+      // Classify error severity
+      const severity = this.classifyErrorSeverity(boostError);
+      
+      // Check wastegate saturation
+      let wastegateSaturated = false;
+      if (wastegateDC !== null) {
+        // Get wastegate max if available
+        if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+          const wgMaxTable = window.tuneFileParser.getTable('wg_max');
+          const wgRpmIndex = window.tuneFileParser.getArray('wg_rpm_index');
+          const wgTpsIndex = window.tuneFileParser.getArray('wg_tps_index');
+          if (wgMaxTable && wgRpmIndex && wgTpsIndex) {
+            const wgMax = window.tuneFileParser.interpolate2D(wgMaxTable, wgRpmIndex, wgTpsIndex, rpm, throttle);
+            // Check if wastegate is at max during overboost (saturation)
+            if (eventType === 'overshoot' && wastegateDC >= wgMax * 0.95) {
+              wastegateSaturated = true;
+            }
+            // Check if wastegate is at min during undershoot (saturation)
+            if (eventType === 'undershoot' && wastegateDC <= 5.0) { // 5% threshold for "closed"
+              wastegateSaturated = true;
+            }
+          }
+        }
+      }
 
-      // Only create events for overshoot/undershoot or significant deviations
-      if (eventType !== 'normal' || Math.abs(boostError) > this.targetTolerance) {
-        // Skip overshoot events at low throttle (< 30%)
-        if (eventType === 'overshoot' && throttle < 30) {
-          // Don't add this event - it's at low throttle
+      // Only create events for overshoot/undershoot, significant deviations, or boost limit violations
+      if (boostLimitViolation || eventType !== 'normal' || Math.abs(boostError) > this.targetTolerance) {
+        // Skip overshoot events at low throttle (< 30%) unless it's a limit violation
+        if (eventType === 'overshoot' && throttle < 30 && !boostLimitViolation) {
           return; // Continue to next iteration
         }
         
-        // Skip undershoot events when throttle is 50% or less
-        if (eventType === 'undershoot' && throttle <= 50) {
-          // Don't add this event - throttle is not high enough
+        // Skip undershoot events when throttle is 50% or less unless it's a limit violation
+        if (eventType === 'undershoot' && throttle <= 50 && !boostLimitViolation) {
           return; // Continue to next iteration
         }
         
@@ -217,10 +284,14 @@ class BoostControlAnalyzer {
           boostError: boostError,
           boostErrorPercent: boostErrorPercent,
           wastegateDC: wastegateDC,
-          rpm: row['Engine Speed (rpm)'] || 0,
+          rpm: rpm,
           throttle: throttle,
           load: row['Load (MAF) (g/rev)'] || 0,
-          eventType: eventType
+          eventType: boostLimitViolation ? 'limit_violation' : eventType,
+          severity: boostLimitViolation ? 'critical' : severity,
+          boostLimit: boostLimit,
+          boostLimitViolation: boostLimitViolation,
+          wastegateSaturated: wastegateSaturated
         });
       }
     });
@@ -234,6 +305,14 @@ class BoostControlAnalyzer {
     const totalTime = timeRange.max - timeRange.min;
     const inTargetPercent = filteredData.length > 0 ? (inTargetCount / filteredData.length) * 100 : 0;
 
+    // Count events by severity
+    const criticalEvents = groupedEvents.filter(e => e.severity === 'critical').length;
+    const severeEvents = groupedEvents.filter(e => e.severity === 'severe').length;
+    const moderateEvents = groupedEvents.filter(e => e.severity === 'moderate').length;
+    const mildEvents = groupedEvents.filter(e => e.severity === 'mild').length;
+    const limitViolations = groupedEvents.filter(e => e.eventType === 'limit_violation').length;
+    const wastegateSaturatedEvents = groupedEvents.filter(e => e.wastegateSaturated === true).length;
+
     this.analysisResults = {
       events: groupedEvents,
       statistics: {
@@ -245,6 +324,12 @@ class BoostControlAnalyzer {
         inTargetPercent: inTargetPercent,
         overshootEvents: groupedEvents.filter(e => e.eventType === 'overshoot').length,
         undershootEvents: groupedEvents.filter(e => e.eventType === 'undershoot').length,
+        limitViolations: limitViolations,
+        criticalEvents: criticalEvents,
+        severeEvents: severeEvents,
+        moderateEvents: moderateEvents,
+        mildEvents: mildEvents,
+        wastegateSaturatedEvents: wastegateSaturatedEvents,
         avgWastegateDC: wastegateCount > 0 ? totalWastegateDC / wastegateCount : 0,
         timeRange: timeRange
       },

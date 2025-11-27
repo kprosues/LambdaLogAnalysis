@@ -163,7 +163,20 @@ const KnockAnalysisTab = {
         },
         tooltip: {
           mode: 'index',
-          intersect: false
+          intersect: false,
+          callbacks: {
+            footer: (tooltipItems) => {
+              // Use TooltipConfig to get footer text
+              if (tooltipItems.length > 0 && window.TooltipConfig && window.dataProcessor) {
+                const dataIndex = tooltipItems[0].dataIndex;
+                const data = window.dataProcessor.getData();
+                if (data && dataIndex >= 0 && dataIndex < data.length) {
+                  return window.TooltipConfig.getTooltipFooter(dataIndex, data);
+                }
+              }
+              return '';
+            }
+          }
         },
         zoom: {
           zoom: {
@@ -514,8 +527,10 @@ const KnockAnalysisTab = {
       this.currentSort.direction = 'asc';
     }
     
+    // Update sort indicators - remove all existing arrows first using regex
     document.querySelectorAll('#knock-anomalyTable th').forEach(th => {
-      th.textContent = th.textContent.replace(' ↑', '').replace(' ↓', '');
+      // Remove all arrow indicators (may be multiple if bug occurred)
+      th.textContent = th.textContent.replace(/ ↑+| ↓+/g, '');
       if (th.dataset.sort === column) {
         th.textContent += this.currentSort.direction === 'asc' ? ' ↑' : ' ↓';
       }

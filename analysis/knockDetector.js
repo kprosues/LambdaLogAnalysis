@@ -4,9 +4,28 @@ class KnockDetector {
     this.dataProcessor = dataProcessor;
     this.knockEvents = [];
     this.severityThresholds = {
-      severe: -4.0  // Less than -4° is severe, -4° or more (less negative) is mild
+      critical: -6.0,  // Less than -6° (approaching max -8.0°)
+      severe: -4.0,    // Less than -4° (current threshold)
+      moderate: -2.0   // Less than -2° (new category)
     };
     this.groupingTimeWindow = 0.1; // Group events within 0.1 seconds (100ms)
+    this.knockRpmMin = 1000; // Minimum RPM for valid knock detection
+    this.knockRetardDecay = 0.2; // Expected recovery rate (°/update)
+    this.knockRetardMax = -8.0; // Maximum knock retard allowed
+    this.knockSensitivityLowLoad = 0.81; // Low load threshold (g/rev)
+    
+    // Load tune file parameters if available
+    this.loadTuneFileParameters();
+  }
+
+  loadTuneFileParameters() {
+    if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+      const params = window.tuneFileParser.getKnockParameters();
+      this.knockRpmMin = params.rpmMin;
+      this.knockRetardDecay = params.retardDecay;
+      this.knockRetardMax = params.retardMax;
+      this.knockSensitivityLowLoad = params.sensitivityLowLoad;
+    }
   }
 
   detectKnockEvents() {
@@ -120,18 +139,39 @@ class KnockDetector {
       
       // Knock events are indicated by negative knock retard values
       if (knockRetard < KNOCK_THRESHOLD) {
+        const rpm = row['Engine Speed (rpm)'] || 0;
+        const load = row['Load (MAF) (g/rev)'] || 0;
+        
+        // RPM-based filtering: filter out knock events below minimum RPM (false positives)
+        if (rpm < this.knockRpmMin) {
+          return; // Skip this event
+        }
+        
+        // Check if in PE mode (for context-aware detection)
+        let isPEMode = false;
+        if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
+          const tps = row['Throttle Position (%)'] || 0;
+          isPEMode = window.tuneFileParser.isPEModeActive(rpm, load, tps);
+        }
+        
+        // Get IAM if available
+        const iam = row['Ignition Advance Multiplier'] || null;
+        
         const event = {
           index: index,
           time: row['Time (s)'],
           knockRetard: knockRetard,
-          rpm: row['Engine Speed (rpm)'] || 0,
+          rpm: rpm,
           throttle: row['Throttle Position (%)'] || 0,
-          load: row['Load (MAF) (g/rev)'] || 0,
+          load: load,
           afr: row['Air/Fuel Sensor #1 (λ)'] || 0,
           boost: row['Manifold Absolute Pressure (kPa)'] || 0,
           coolantTemp: row['Coolant Temperature (°C)'] || 0,
           intakeTemp: row['Intake Air Temperature (°C)'] || 0,
-          severity: this.categorizeSeverity(knockRetard)
+          severity: this.categorizeSeverity(knockRetard, load),
+          isPEMode: isPEMode,
+          iam: iam,
+          isLowLoad: load < this.knockSensitivityLowLoad
         };
         
         this.knockEvents.push(event);
@@ -146,17 +186,95 @@ class KnockDetector {
     // Group nearby knock events
     this.knockEvents = this.groupKnockEvents(this.knockEvents);
     
+    // Analyze knock recovery
+    this.analyzeKnockRecovery();
+    
     console.log(`Grouped knock events: ${this.knockEvents.length}`);
 
     return this.knockEvents;
   }
 
-  categorizeSeverity(knockRetard) {
+  analyzeKnockRecovery() {
+    // Track recovery rate for grouped events
+    // Recovery is when knock retard increases toward 0 (becomes less negative)
+    const data = this.dataProcessor.getData();
+    if (!data || data.length === 0) return;
+
+    // For each grouped event, check recovery after the event
+    this.knockEvents.forEach((event, eventIndex) => {
+      // Find data points after this event
+      const eventEndIndex = event.index + (event.eventCount || 1);
+      const recoveryWindow = 2.0; // Look 2 seconds ahead for recovery
+      const eventEndTime = event.time + (event.duration || 0);
+      const recoveryEndTime = eventEndTime + recoveryWindow;
+
+      let recoveryPoints = [];
+      for (let i = eventEndIndex; i < data.length && i < eventEndIndex + 100; i++) {
+        const row = data[i];
+        const time = row['Time (s)'] || 0;
+        if (time > recoveryEndTime) break;
+
+        const knockRetard = parseFloat(row['Knock Retard (°)'] || 0);
+        if (knockRetard < -0.0001) {
+          recoveryPoints.push({ time, knockRetard });
+        } else {
+          // Recovery complete (knock retard back to 0 or positive)
+          break;
+        }
+      }
+
+      // Calculate recovery rate
+      if (recoveryPoints.length > 1) {
+        const timeDiff = recoveryPoints[recoveryPoints.length - 1].time - recoveryPoints[0].time;
+        const retardDiff = recoveryPoints[recoveryPoints.length - 1].knockRetard - recoveryPoints[0].knockRetard;
+        const recoveryRate = timeDiff > 0 ? retardDiff / timeDiff : 0; // °/second
+
+        // Expected recovery rate: 0.2°/update, assuming ~10 updates/second = 2.0°/second
+        const expectedRecoveryRate = this.knockRetardDecay * 10; // Approximate updates per second
+        const recoveryRatio = Math.abs(recoveryRate) / expectedRecoveryRate;
+
+        event.recoveryRate = recoveryRate;
+        event.recoveryTime = timeDiff;
+        event.slowRecovery = recoveryRatio < 0.5; // Recovery is less than 50% of expected
+        event.persistentKnock = recoveryPoints.length > 20; // More than 20 data points still showing knock
+      } else if (recoveryPoints.length === 0) {
+        // Immediate recovery (good)
+        event.recoveryRate = 0;
+        event.recoveryTime = 0;
+        event.slowRecovery = false;
+        event.persistentKnock = false;
+      } else {
+        // Single point - can't calculate rate
+        event.recoveryRate = null;
+        event.recoveryTime = null;
+        event.slowRecovery = false;
+        event.persistentKnock = false;
+      }
+    });
+  }
+
+  categorizeSeverity(knockRetard, load = 0) {
     // Knock retard is negative
-    // -4° or more (less negative, e.g., -4, -3, -2) = mild
-    // Less than -4° (more negative, e.g., -5, -6, -7) = severe
-    if (knockRetard < this.severityThresholds.severe) {
+    // Multi-tier severity classification:
+    // Critical: < -6.0° (approaching max -8.0°)
+    // Severe: < -4.0° (current threshold)
+    // Moderate: < -2.0° (new category)
+    // Mild: >= -2.0° && < -0.0001°
+    
+    // Adjust severity based on load context
+    // Knock at low load may be more significant due to higher sensitivity
+    let adjustedThreshold = 0;
+    if (load < this.knockSensitivityLowLoad) {
+      // At low load, be more sensitive - reduce thresholds slightly
+      adjustedThreshold = 0.5; // Make thresholds 0.5° less negative (more sensitive)
+    }
+    
+    if (knockRetard < (this.severityThresholds.critical + adjustedThreshold)) {
+      return 'critical';
+    } else if (knockRetard < (this.severityThresholds.severe + adjustedThreshold)) {
       return 'severe';
+    } else if (knockRetard < (this.severityThresholds.moderate + adjustedThreshold)) {
+      return 'moderate';
     } else {
       return 'mild';
     }
@@ -168,9 +286,14 @@ class KnockDetector {
         totalEvents: 0,
         maxKnockRetard: 0,
         timeWithKnock: 0,
+        criticalEvents: 0,
         severeEvents: 0,
+        moderateEvents: 0,
         mildEvents: 0,
         avgKnockRetard: 0,
+        slowRecoveryEvents: 0,
+        persistentKnockEvents: 0,
+        pemodeEvents: 0,
         rpmRange: { min: 0, max: 0 },
         timeRange: { min: 0, max: 0 }
       };
@@ -195,9 +318,14 @@ class KnockDetector {
       maxKnockRetard: maxKnockRetard, // Keep as negative for display
       maxKnockRetardAbs: maxKnockRetardAbs, // Absolute value for reference
       timeWithKnock: timeWithKnockPercent,
+      criticalEvents: this.knockEvents.filter(e => e.severity === 'critical').length,
       severeEvents: this.knockEvents.filter(e => e.severity === 'severe').length,
+      moderateEvents: this.knockEvents.filter(e => e.severity === 'moderate').length,
       mildEvents: this.knockEvents.filter(e => e.severity === 'mild').length,
       avgKnockRetard: knockRetards.reduce((a, b) => a + b, 0) / knockRetards.length,
+      slowRecoveryEvents: this.knockEvents.filter(e => e.slowRecovery === true).length,
+      persistentKnockEvents: this.knockEvents.filter(e => e.persistentKnock === true).length,
+      pemodeEvents: this.knockEvents.filter(e => e.isPEMode === true).length,
       rpmRange: {
         min: Math.min(...rpms),
         max: Math.max(...rpms)
@@ -281,8 +409,16 @@ class KnockDetector {
       boost: avgBoost,
       coolantTemp: avgCoolantTemp,
       intakeTemp: avgIntakeTemp,
-      severity: this.categorizeSeverity(mostSevereEvent.knockRetard),
-      eventCount: eventGroup.length // Number of data points in this grouped event
+      severity: mostSevereEvent.severity, // Use severity from most severe event
+      isPEMode: eventGroup.some(e => e.isPEMode), // True if any event in group was in PE mode
+      isLowLoad: avgLoad < this.knockSensitivityLowLoad,
+      iam: eventGroup.find(e => e.iam !== null && e.iam !== undefined)?.iam || null, // Get IAM if available
+      eventCount: eventGroup.length, // Number of data points in this grouped event
+      // Recovery data will be added by analyzeKnockRecovery()
+      recoveryRate: null,
+      recoveryTime: null,
+      slowRecovery: false,
+      persistentKnock: false
     };
   }
 

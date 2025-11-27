@@ -1,5 +1,10 @@
 // Boost Control Tab Module
 const BoostControlTab = {
+  // Conversion factor: 1 kPa = 0.1450377377 PSI
+  kPaToPSI(kpa) {
+    return kpa * 0.1450377377;
+  },
+
   elements: {
     maxOvershoot: null,
     inTargetPercent: null,
@@ -286,7 +291,7 @@ const BoostControlTab = {
     }
     
     if (this.elements.maxOvershoot) {
-      this.elements.maxOvershoot.textContent = stats.maxOvershoot.toFixed(2) + ' kPa';
+      this.elements.maxOvershoot.textContent = this.kPaToPSI(stats.maxOvershoot).toFixed(2) + ' PSI';
     }
     if (this.elements.inTargetPercent) {
       this.elements.inTargetPercent.textContent = stats.inTargetPercent.toFixed(2) + '%';
@@ -346,6 +351,9 @@ const BoostControlTab = {
     }
 
     const times = filteredData.map(row => row['Time (s)']);
+    
+    // Get RPM data for tooltips
+    const rpms = filteredData.map(row => parseFloat(row['Engine Speed (rpm)']) || 0);
     
     // Helper function to break lines at gaps > 1 second
     // Inserts NaN values to break line connections when time gap > 1 second
@@ -419,8 +427,8 @@ const BoostControlTab = {
     const overshootEvents = events.filter(e => e.eventType === 'overshoot');
     const undershootEvents = events.filter(e => e.eventType === 'undershoot');
 
-    const overshootPoints = createEventPointArray(overshootEvents, e => e.actualBoost);
-    const undershootPoints = createEventPointArray(undershootEvents, e => e.actualBoost);
+    const overshootPoints = createEventPointArray(overshootEvents, e => this.kPaToPSI(e.actualBoost));
+    const undershootPoints = createEventPointArray(undershootEvents, e => this.kPaToPSI(e.actualBoost));
 
     // Chart configuration
     const chartOptions = {
@@ -433,7 +441,20 @@ const BoostControlTab = {
         },
         tooltip: {
           mode: 'index',
-          intersect: false
+          intersect: false,
+          callbacks: {
+            footer: (tooltipItems) => {
+              // Use TooltipConfig to get footer text
+              if (tooltipItems.length > 0 && window.TooltipConfig && window.dataProcessor) {
+                const dataIndex = tooltipItems[0].dataIndex;
+                const data = window.dataProcessor.getData();
+                if (data && dataIndex >= 0 && dataIndex < data.length) {
+                  return window.TooltipConfig.getTooltipFooter(dataIndex, data);
+                }
+              }
+              return '';
+            }
+          }
         },
         zoom: {
           zoom: {
@@ -488,7 +509,7 @@ const BoostControlTab = {
       const datasets = [
         {
           label: 'Boost Target',
-          data: boostTargets,
+          data: boostTargets.map(v => this.kPaToPSI(v)),
           borderColor: 'rgb(0, 123, 255)',
           backgroundColor: 'rgba(0, 123, 255, 0.1)',
           borderWidth: 2,
@@ -498,7 +519,7 @@ const BoostControlTab = {
         },
         {
           label: 'Actual Boost',
-          data: actualBoosts,
+          data: actualBoosts.map(v => this.kPaToPSI(v)),
           borderColor: 'rgb(40, 167, 69)',
           backgroundColor: 'rgba(40, 167, 69, 0.1)',
           borderWidth: 2,
@@ -563,7 +584,7 @@ const BoostControlTab = {
             position: 'left',
             title: {
               display: true,
-              text: 'Boost Pressure (kPa)'
+              text: 'Boost Pressure (PSI)'
             }
           },
           ...(this.showThrottle ? {
@@ -605,8 +626,8 @@ const BoostControlTab = {
     if (boostErrorChartEl) {
       const errorDatasets = [
         {
-          label: 'Boost Error (kPa)',
-          data: boostErrors,
+          label: 'Boost Error (PSI)',
+          data: boostErrors.map(v => this.kPaToPSI(v)),
           borderColor: 'rgb(220, 53, 69)',
           backgroundColor: 'rgba(220, 53, 69, 0.1)',
           borderWidth: 2,
@@ -656,7 +677,7 @@ const BoostControlTab = {
               position: 'left',
               title: {
                 display: true,
-                text: 'Error (kPa)'
+                text: 'Error (PSI)'
               }
             },
             ...(this.showThrottle ? {
@@ -837,8 +858,12 @@ const BoostControlTab = {
           bVal = Math.abs(b.boostError);
           break;
         case 'boostErrorPercent':
-          aVal = Math.abs(a.boostErrorPercent);
-          bVal = Math.abs(b.boostErrorPercent);
+          // Calculate error percentage the same way as display (using maxBoostError if available)
+          const aErrorForPercent = a.maxBoostError !== undefined ? a.maxBoostError : a.boostError;
+          aVal = a.boostTarget > 0 ? Math.abs((aErrorForPercent / a.boostTarget) * 100) : 0;
+          
+          const bErrorForPercent = b.maxBoostError !== undefined ? b.maxBoostError : b.boostError;
+          bVal = b.boostTarget > 0 ? Math.abs((bErrorForPercent / b.boostTarget) * 100) : 0;
           break;
         case 'wastegateDC':
           aVal = a.wastegateDC || 0;
@@ -887,9 +912,9 @@ const BoostControlTab = {
       
       row.innerHTML = `
         <td>${timeDisplay}</td>
-        <td>${event.boostTarget.toFixed(2)}</td>
-        <td>${event.actualBoost.toFixed(2)}</td>
-        <td>${errorDisplay.toFixed(2)}</td>
+        <td>${this.kPaToPSI(event.boostTarget).toFixed(2)}</td>
+        <td>${this.kPaToPSI(event.actualBoost).toFixed(2)}</td>
+        <td>${this.kPaToPSI(errorDisplay).toFixed(2)}</td>
         <td>${errorPercentDisplay}%</td>
         <td>${event.wastegateDC !== null ? event.wastegateDC.toFixed(1) : 'N/A'}</td>
         <td><span class="severity-badge ${eventTypeClass}">${event.eventType}</span></td>
@@ -937,8 +962,10 @@ const BoostControlTab = {
       this.currentSort.direction = 'asc';
     }
     
+    // Update sort indicators - remove all existing arrows first using regex
     document.querySelectorAll('#boost-boostTable th').forEach(th => {
-      th.textContent = th.textContent.replace(' ↑', '').replace(' ↓', '');
+      // Remove all arrow indicators (may be multiple if bug occurred)
+      th.textContent = th.textContent.replace(/ ↑+| ↓+/g, '');
       if (th.dataset.sort === column) {
         th.textContent += this.currentSort.direction === 'asc' ? ' ↑' : ' ↓';
       }
