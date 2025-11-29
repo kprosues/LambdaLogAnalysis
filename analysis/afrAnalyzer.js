@@ -74,6 +74,7 @@ class AFRAnalyzer {
           totalDataPoints: 0,
           avgError: 0,
           avgErrorAbs: 0,
+          avgDeviationPercent: 0,
           maxLean: 0,
           maxRich: 0,
           inTargetPercent: 0,
@@ -91,14 +92,19 @@ class AFRAnalyzer {
       return emptyResult;
     }
 
-    const events = [];
+    const allDataPoints = [];
+    const OPEN_LOOP_THRESHOLD = 0.85; // Target lambda < 0.85 indicates open loop (PE mode)
+    
+    // Statistics variables (will be calculated after filtering by duration)
     let totalError = 0;
     let totalErrorAbs = 0;
+    let totalDeviationPercent = 0;
+    let totalDeviationPercentAbs = 0;
     let inTargetCount = 0;
     let maxLean = 0;
     let maxRich = 0;
+    let maxDeviationPercent = 0;
     let validDataPointCount = 0;
-    let validDataPointCountForTimeInTarget = 0; // Counts points with throttle >= 15%
 
     data.forEach((row, index) => {
       const time = row['Time (s)'];
@@ -111,53 +117,30 @@ class AFRAnalyzer {
         return;
       }
 
-      // Skip records where commanded AFR is 1 (stoichiometric, often idle/neutral state)
-      // Use small tolerance for floating point comparison
-      if (Math.abs(targetAFR - 1.0) < 0.001) {
-        return;
+      // FOCUS ON OPEN LOOP MODE: Only process data points where target lambda < 0.85
+      // This indicates power enrichment (PE) mode - open loop fueling
+      if (targetAFR >= OPEN_LOOP_THRESHOLD) {
+        return; // Skip closed-loop data points
       }
 
-      validDataPointCount++;
-
-      // Get throttle position, RPM, and load (needed for filtering and PE mode detection)
+      // Get throttle position, RPM, and load
       const throttle = parseFloat(row['Throttle Position (%)']) || 0;
       const rpm = parseFloat(row['Engine Speed (rpm)']) || 0;
       const load = parseFloat(row['Load (MAF) (g/rev)']) || 0;
 
-      // Early exit: Skip all AFR error events at very low throttle (< 10%) unless it's a target mismatch
-      // This must be checked early, before calculating error and determining event type
-      // We'll check for target mismatch after PE mode detection, but filter lean/rich events here
-      let isPEMode = false;
-      let expectedPETarget = null;
-      let targetMismatch = false;
-      
-      if (window.tuneFileParser && window.tuneFileParser.isLoaded()) {
-        isPEMode = window.tuneFileParser.isPEModeActive(rpm, load, throttle);
-        
-        if (isPEMode) {
-          // Calculate expected PE target (use pe_initial for now, could check IAM for pe_safe)
-          expectedPETarget = window.tuneFileParser.getPETarget(rpm, load, 'initial');
-          
-          // Check if logged target matches expected target (within tolerance)
-          if (expectedPETarget && Math.abs(targetAFR - expectedPETarget) > 0.01) {
-            targetMismatch = true;
-          }
-        }
-      }
-
       // Calculate AFR error: measured - target
-      // Positive error = measured > target = lean (too much air)
-      // Negative error = measured < target = rich (too much fuel)
       const afrError = measuredAFR - targetAFR;
-      const afrErrorPercent = targetAFR > 0 ? (afrError / targetAFR) * 100 : 0;
+      
+      // Calculate percent deviation from target: (error / target) * 100
+      const deviationPercent = targetAFR > 0 ? (afrError / targetAFR) * 100 : 0;
+      const deviationPercentAbs = Math.abs(deviationPercent);
 
-      // Use different thresholds for PE mode vs closed-loop
-      const leanThreshold = isPEMode ? this.peLeanThreshold : this.leanThreshold;
-      const richThreshold = isPEMode ? this.peRichThreshold : this.richThreshold;
-      const targetTolerance = isPEMode ? this.peTargetTolerance : this.targetTolerance;
+      // Use PE mode thresholds
+      const leanThreshold = this.peLeanThreshold;
+      const richThreshold = this.peRichThreshold;
+      const targetTolerance = this.peTargetTolerance;
 
       // Determine event type based on error magnitude
-      // Use stricter thresholds for PE mode, but still detect in closed-loop
       let eventType = 'normal';
       if (afrError > leanThreshold) {
         eventType = 'lean';
@@ -165,75 +148,123 @@ class AFRAnalyzer {
         eventType = 'rich';
       }
 
-      // Skip all events at very low throttle (< 10%) unless it's a target mismatch
-      // Low throttle events are often idle/neutral and less meaningful, regardless of error size
-      // This check must happen before creating any events
-      if (throttle < 10 && !targetMismatch) {
-        // Still track statistics for these points, but don't create events
-        totalError += afrError;
-        totalErrorAbs += Math.abs(afrError);
-        
-        // Only count "in target" for points with throttle >= 15%
-        if (Math.abs(afrError) <= targetTolerance && throttle >= 15) {
-          inTargetCount++;
-        }
-        
-        if (afrError > maxLean) {
-          maxLean = afrError;
-        }
-        if (afrError < maxRich) {
-          maxRich = afrError;
-        }
-        
-        return; // Continue to next iteration without adding event
-      }
+      // Check if this is a significant deviation (error or outside tolerance)
+      const isSignificantDeviation = eventType !== 'normal' || Math.abs(afrError) > targetTolerance;
 
-      // Count data points that meet "time in target" criteria (throttle >= 15%)
-      if (throttle >= 15) {
-        validDataPointCountForTimeInTarget++;
-      }
+      allDataPoints.push({
+        index: index,
+        time: time,
+        targetAFR: targetAFR,
+        measuredAFR: measuredAFR,
+        afrError: afrError,
+        afrErrorPercent: deviationPercent,
+        deviationPercent: deviationPercent,
+        deviationPercentAbs: deviationPercentAbs,
+        rpm: rpm,
+        throttle: throttle,
+        load: load,
+        eventType: eventType,
+        isSignificantDeviation: isSignificantDeviation,
+        isInTarget: Math.abs(afrError) <= targetTolerance
+      });
+    });
 
-      // Track statistics
-      totalError += afrError;
-      totalErrorAbs += Math.abs(afrError);
-      
-      // Only count "in target" for points with throttle >= 15%
-      if (Math.abs(afrError) <= targetTolerance && throttle >= 15) {
+    // Calculate average sampling interval from the full dataset for accurate duration calculation
+    let avgSamplingInterval = 0.05; // Default to 50ms if we can't calculate
+    if (data && data.length > 1) {
+      let totalInterval = 0;
+      let intervalCount = 0;
+      for (let i = 1; i < Math.min(data.length, 1000); i++) { // Sample first 1000 points for efficiency
+        const time1 = parseFloat(data[i - 1]['Time (s)']);
+        const time2 = parseFloat(data[i]['Time (s)']);
+        if (!isNaN(time1) && !isNaN(time2)) {
+          const interval = time2 - time1;
+          if (interval > 0 && interval < 1.0) { // Only count reasonable intervals (< 1 second)
+            totalInterval += interval;
+            intervalCount++;
+          }
+        }
+      }
+      if (intervalCount > 0) {
+        avgSamplingInterval = totalInterval / intervalCount;
+      }
+      // Ensure minimum sampling interval (at least 10ms)
+      if (avgSamplingInterval < 0.01) {
+        avgSamplingInterval = 0.01;
+      }
+      console.log(`AFR Analyzer: Calculated average sampling interval: ${(avgSamplingInterval * 1000).toFixed(2)}ms`);
+    } else {
+      console.warn('AFR Analyzer: Could not calculate sampling interval, using default 50ms');
+    }
+
+    // Group consecutive error periods and filter by duration (100ms minimum)
+    const MIN_ERROR_DURATION = 0.1; // 100ms
+    const errorPeriods = this.groupErrorPeriods(allDataPoints, MIN_ERROR_DURATION, avgSamplingInterval);
+    
+    // Only count data points that are part of error periods lasting > 100ms
+    const validDataPoints = allDataPoints.filter(dp => {
+      return errorPeriods.some(period => 
+        period.dataPoints.some(p => p.index === dp.index)
+      );
+    });
+
+    // Calculate statistics only for valid data points (errors lasting > 100ms)
+    validDataPoints.forEach(dp => {
+      validDataPointCount++;
+      totalError += dp.afrError;
+      totalErrorAbs += Math.abs(dp.afrError);
+      totalDeviationPercent += dp.deviationPercent;
+      totalDeviationPercentAbs += dp.deviationPercentAbs;
+
+      if (dp.isInTarget) {
         inTargetCount++;
       }
 
-      if (afrError > maxLean) {
-        maxLean = afrError;
+      if (dp.afrError > maxLean) {
+        maxLean = dp.afrError;
       }
-      if (afrError < maxRich) {
-        maxRich = afrError;
+      if (dp.afrError < maxRich) {
+        maxRich = dp.afrError;
+      }
+      if (dp.deviationPercentAbs > maxDeviationPercent) {
+        maxDeviationPercent = dp.deviationPercentAbs;
+      }
+    });
+
+    // Create events only from error periods that last > 100ms
+    const events = errorPeriods.map(period => {
+      // Find the most severe error in the period
+      const mostSevere = period.dataPoints.reduce((prev, current) => {
+        return Math.abs(current.afrError) > Math.abs(prev.afrError) ? current : prev;
+      });
+
+      // Ensure duration is calculated and valid
+      let eventDuration = period.duration;
+      if (!eventDuration || eventDuration <= 0 || isNaN(eventDuration)) {
+        // Recalculate duration if it's missing or invalid
+        eventDuration = this.calculatePeriodDuration(period, avgSamplingInterval);
+        // Safety check: ensure duration is at least the sampling interval
+        if (!eventDuration || eventDuration <= 0) {
+          eventDuration = avgSamplingInterval;
+        }
       }
 
-      // Create events for lean/rich conditions, significant deviations, or target mismatches
-      // Suppress events that deviate 7% or less from target (unless it's a target mismatch)
-      const isSignificantDeviation = eventType !== 'normal' || Math.abs(afrError) > targetTolerance;
-      const meetsMinimumDeviation = Math.abs(afrErrorPercent) > 7.0;
-      
-      // Always create target mismatch events, but for other events require > 7% deviation
-      const shouldCreateEvent = targetMismatch || (isSignificantDeviation && meetsMinimumDeviation);
-
-      if (shouldCreateEvent) {
-        events.push({
-          index: index,
-          time: time,
-          targetAFR: targetAFR,
-          measuredAFR: measuredAFR,
-          afrError: afrError,
-          afrErrorPercent: afrErrorPercent,
-          rpm: rpm,
-          throttle: throttle,
-          load: load,
-          eventType: targetMismatch ? 'target_mismatch' : eventType,
-          isPEMode: isPEMode,
-          expectedPETarget: expectedPETarget,
-          targetMismatch: targetMismatch
-        });
-      }
+      return {
+        index: mostSevere.index,
+        time: period.startTime,
+        endTime: period.endTime,
+        duration: eventDuration,
+        targetAFR: mostSevere.targetAFR,
+        measuredAFR: mostSevere.measuredAFR,
+        afrError: mostSevere.afrError,
+        afrErrorPercent: mostSevere.deviationPercent,
+        rpm: mostSevere.rpm,
+        throttle: mostSevere.throttle,
+        load: mostSevere.load,
+        eventType: mostSevere.eventType,
+        isPEMode: true,
+        deviationPercent: mostSevere.deviationPercent
+      };
     });
 
     // Group nearby events of the same type
@@ -241,9 +272,11 @@ class AFRAnalyzer {
     const groupedEvents = this.groupAFREvents(events);
     console.log(`Grouped AFR events: ${groupedEvents.length}`);
 
-    // Calculate "time in target" using only data points with throttle >= 15%
-    // This excludes idle/low throttle periods and target AFR of 1
-    const inTargetPercent = validDataPointCountForTimeInTarget > 0 ? (inTargetCount / validDataPointCountForTimeInTarget) * 100 : 0;
+    // Calculate "time in target" percentage for open loop mode
+    const inTargetPercent = validDataPointCount > 0 ? (inTargetCount / validDataPointCount) * 100 : 0;
+
+    // Calculate average deviation percentage (absolute value) from target
+    const avgDeviationPercent = validDataPointCount > 0 ? totalDeviationPercentAbs / validDataPointCount : 0;
 
     this.analysisResults = {
       events: groupedEvents,
@@ -251,22 +284,116 @@ class AFRAnalyzer {
         totalDataPoints: validDataPointCount,
         avgError: validDataPointCount > 0 ? totalError / validDataPointCount : 0,
         avgErrorAbs: validDataPointCount > 0 ? totalErrorAbs / validDataPointCount : 0,
+        avgDeviationPercent: avgDeviationPercent,
         maxLean: maxLean,
         maxRich: maxRich,
+        maxDeviationPercent: maxDeviationPercent,
         inTargetPercent: inTargetPercent,
         leanEvents: groupedEvents.filter(e => e.eventType === 'lean').length,
         richEvents: groupedEvents.filter(e => e.eventType === 'rich').length,
-        pemodeEvents: groupedEvents.filter(e => e.isPEMode === true).length,
-        targetMismatchEvents: groupedEvents.filter(e => e.targetMismatch === true).length,
         timeRange: this.dataProcessor ? this.dataProcessor.getTimeRange() : { min: 0, max: 0 }
       },
       columns: {
         targetAFR: targetAFRCol,
         measuredAFR: measuredAFRCol
-      }
+      },
+      validDataPoints: validDataPoints, // Store for pe_final calculation (errors > 100ms)
+      allOpenLoopDataPoints: allDataPoints // Store all open loop data points for pe_final calculation
     };
 
     return this.analysisResults;
+  }
+
+  groupErrorPeriods(dataPoints, minDuration, avgSamplingInterval) {
+    // Group consecutive data points with significant deviations into error periods
+    const errorPeriods = [];
+    let currentPeriod = null;
+
+    // Sort by time
+    const sortedPoints = [...dataPoints].sort((a, b) => a.time - b.time);
+
+    for (const point of sortedPoints) {
+      if (!point.isSignificantDeviation) {
+        // End current period if we hit a point without significant deviation
+        if (currentPeriod) {
+          const duration = this.calculatePeriodDuration(currentPeriod, avgSamplingInterval);
+          if (duration >= minDuration) {
+            currentPeriod.duration = duration;
+            errorPeriods.push(currentPeriod);
+          }
+          currentPeriod = null;
+        }
+        continue;
+      }
+
+      if (!currentPeriod) {
+        // Start a new error period
+        currentPeriod = {
+          startTime: point.time,
+          endTime: point.time,
+          dataPoints: [point]
+        };
+      } else {
+        // Check if this point is consecutive (within reasonable time gap, e.g., 0.5s)
+        const timeDiff = point.time - currentPeriod.endTime;
+        if (timeDiff <= 0.5) {
+          // Continue the current period
+          currentPeriod.endTime = point.time;
+          currentPeriod.dataPoints.push(point);
+        } else {
+          // Gap too large, finalize current period and start new one
+          const duration = this.calculatePeriodDuration(currentPeriod, avgSamplingInterval);
+          if (duration >= minDuration) {
+            currentPeriod.duration = duration;
+            errorPeriods.push(currentPeriod);
+          }
+          currentPeriod = {
+            startTime: point.time,
+            endTime: point.time,
+            dataPoints: [point]
+          };
+        }
+      }
+    }
+
+    // Don't forget the last period
+    if (currentPeriod) {
+      const duration = this.calculatePeriodDuration(currentPeriod, avgSamplingInterval);
+      if (duration >= minDuration) {
+        currentPeriod.duration = duration;
+        errorPeriods.push(currentPeriod);
+      }
+    }
+
+    return errorPeriods;
+  }
+
+  calculatePeriodDuration(period, avgSamplingInterval) {
+    // Calculate duration accounting for sampling interval
+    // For a period with N data points spanning from t1 to tN:
+    // Duration = (tN - t1) + avgSamplingInterval
+    // This accounts for the fact that the last data point represents a sample over an interval
+    const timeSpan = period.endTime - period.startTime;
+    const numPoints = period.dataPoints.length;
+    
+    let duration;
+    if (numPoints === 1) {
+      // Single data point: use average sampling interval as duration
+      // This represents the time span covered by a single sample
+      duration = avgSamplingInterval;
+    } else {
+      // Multiple data points: 
+      // Duration = time span from first to last point + one sampling interval
+      // This accounts for the fact that the last point represents a sample over an interval
+      const calculatedDuration = timeSpan + avgSamplingInterval;
+      // Ensure minimum duration is at least (numPoints * avgSamplingInterval) to account for all points
+      const minExpectedDuration = numPoints * avgSamplingInterval;
+      duration = Math.max(calculatedDuration, minExpectedDuration);
+    }
+    
+    // Safety check: ensure duration is never zero or negative
+    // Use at least the sampling interval as minimum
+    return Math.max(duration, avgSamplingInterval);
   }
 
   groupAFREvents(events) {
@@ -333,7 +460,34 @@ class AFRAnalyzer {
     // Use the start time of the group
     const startTime = eventGroup[0].time;
     const endTime = eventGroup[eventGroup.length - 1].time;
-    const duration = endTime - startTime;
+    
+    // Calculate duration: sum of individual event durations, or time span if durations are missing
+    // This ensures grouped events have accurate duration
+    let duration = 0;
+    const validDurations = eventGroup.filter(e => e.duration && e.duration > 0 && !isNaN(e.duration));
+    if (validDurations.length > 0) {
+      // Sum the durations of all events in the group
+      duration = validDurations.reduce((sum, e) => sum + e.duration, 0);
+    } else {
+      // Fallback: use time span + estimate based on number of events
+      const timeSpan = endTime - startTime;
+      // Estimate sampling interval from the events themselves
+      let estimatedInterval = 0.05; // Default 50ms
+      if (eventGroup.length > 1) {
+        const intervals = [];
+        for (let i = 1; i < eventGroup.length; i++) {
+          const interval = eventGroup[i].time - eventGroup[i - 1].time;
+          if (interval > 0 && interval < 1.0) {
+            intervals.push(interval);
+          }
+        }
+        if (intervals.length > 0) {
+          estimatedInterval = intervals.reduce((sum, i) => sum + i, 0) / intervals.length;
+        }
+      }
+      // Duration = time span + one sampling interval per event
+      duration = Math.max(timeSpan + estimatedInterval, eventGroup.length * estimatedInterval);
+    }
     
     // Use the actual values from the event at the start time (to match chart display)
     // This ensures table values match what's shown in the chart at that time
@@ -459,5 +613,6 @@ class AFRAnalyzer {
     }
     return this.analysisResults ? this.analysisResults.columns : null;
   }
+
 }
 

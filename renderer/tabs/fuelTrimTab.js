@@ -15,6 +15,7 @@ const FuelTrimTab = {
   chartOriginalRanges: {},
   currentSort: { column: null, direction: 'asc' },
   showThrottle: true,
+  selectedRow: null, // Track currently selected row
 
   initialize() {
     // Get DOM elements for this tab
@@ -582,6 +583,7 @@ const FuelTrimTab = {
     });
     
     this.elements.fuelTrimTableBody.innerHTML = '';
+    this.selectedRow = null;
     
     sortedEvents.forEach(event => {
       const row = document.createElement('tr');
@@ -609,7 +611,17 @@ const FuelTrimTab = {
         <td><span class="severity-badge ${eventTypeClass}">${event.eventType}</span></td>
       `;
       
+      // Add click handler to zoom to event and highlight row
       row.addEventListener('click', () => {
+        // Remove highlight from previously selected row
+        if (this.selectedRow && this.selectedRow !== row) {
+          this.selectedRow.style.backgroundColor = '';
+        }
+        
+        // Highlight clicked row
+        row.style.backgroundColor = '#b3d9ff';
+        this.selectedRow = row;
+        
         const eventTime = parseFloat(row.dataset.eventTime);
         const eventDuration = parseFloat(row.dataset.eventDuration);
         if (typeof zoomChartsToEvent === 'function') {
@@ -617,11 +629,16 @@ const FuelTrimTab = {
         }
       });
       
+      // Add hover effect (only if not selected)
       row.addEventListener('mouseenter', () => {
-        row.style.backgroundColor = '#e8f4f8';
+        if (this.selectedRow !== row) {
+          row.style.backgroundColor = '#e8f4f8';
+        }
       });
       row.addEventListener('mouseleave', () => {
-        row.style.backgroundColor = '';
+        if (this.selectedRow !== row) {
+          row.style.backgroundColor = '';
+        }
       });
       
       this.elements.fuelTrimTableBody.appendChild(row);

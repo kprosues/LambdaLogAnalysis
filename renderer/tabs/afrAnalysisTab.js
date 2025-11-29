@@ -17,6 +17,7 @@ const AFRAnalysisTab = {
   currentSort: { column: null, direction: 'asc' },
   showAFR: true, // Always show AFR values (converted from lambda)
   AFR_CONVERSION_FACTOR: 14.7, // 1 lambda = 14.7 AFR
+  selectedRow: null, // Track currently selected row
 
   initialize() {
     // Get DOM elements for this tab
@@ -42,6 +43,13 @@ const AFRAnalysisTab = {
     document.querySelectorAll('#afr-afrTable th[data-sort]').forEach(th => {
       th.addEventListener('click', () => this.handleSort(th.dataset.sort));
     });
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.style.display = 'none';
+        }
+      });
+    }
   },
 
   render(analysisData) {
@@ -142,20 +150,18 @@ const AFRAnalysisTab = {
       return;
     }
     
-    // Always apply AFR conversion factor
-    const conversionFactor = this.AFR_CONVERSION_FACTOR;
-    const unitLabel = 'AFR';
-    const decimalPlaces = 1;
-    
+    // Display average deviation percentage from target (open loop mode only)
     if (this.elements.avgError) {
-      const avgError = stats.avgErrorAbs * conversionFactor;
-      this.elements.avgError.textContent = avgError.toFixed(decimalPlaces) + ' ' + unitLabel;
+      const avgDeviationPercent = stats.avgDeviationPercent || 0;
+      this.elements.avgError.textContent = avgDeviationPercent.toFixed(2) + '%';
     }
+    
+    // Display max deviation percentage from target
     if (this.elements.maxLean) {
-      // Show max deviation (absolute value of maxRich, or maxLean)
-      const maxDeviation = Math.max(Math.abs(stats.maxRich), Math.abs(stats.maxLean)) * conversionFactor;
-      this.elements.maxLean.textContent = maxDeviation.toFixed(decimalPlaces) + ' ' + unitLabel;
+      const maxDeviationPercent = stats.maxDeviationPercent || 0;
+      this.elements.maxLean.textContent = maxDeviationPercent.toFixed(2) + '%';
     }
+    
     if (this.elements.inTargetPercent) {
       this.elements.inTargetPercent.textContent = stats.inTargetPercent.toFixed(2) + '%';
     }
@@ -212,6 +218,7 @@ const AFRAnalysisTab = {
     }
 
     const columns = analysisData.columns;
+    const OPEN_LOOP_THRESHOLD = 0.85; // Target lambda < 0.85 indicates open loop (PE mode)
     
     const times = data.map(row => row['Time (s)']);
     
@@ -230,17 +237,34 @@ const AFRAnalysisTab = {
       return result;
     };
     
-    // Get AFR data
-    const targetAFRsRaw = data.map(row => parseFloat(row[columns.targetAFR]) || 0);
-    const measuredAFRsRaw = data.map(row => parseFloat(row[columns.measuredAFR]) || 0);
+    // Get AFR data - filter to only open loop mode (target lambda < 0.85)
+    const targetAFRsRaw = data.map((row, idx) => {
+      const target = parseFloat(row[columns.targetAFR]) || 0;
+      // Only include data points where target lambda < 0.85 (open loop mode)
+      return target < OPEN_LOOP_THRESHOLD ? target : NaN;
+    });
+    const measuredAFRsRaw = data.map((row, idx) => {
+      const target = parseFloat(row[columns.targetAFR]) || 0;
+      const measured = parseFloat(row[columns.measuredAFR]) || 0;
+      // Only include data points where target lambda < 0.85 (open loop mode)
+      return target < OPEN_LOOP_THRESHOLD ? measured : NaN;
+    });
     const afrErrorsRaw = data.map((row, idx) => {
       const target = targetAFRsRaw[idx];
       const measured = measuredAFRsRaw[idx];
+      // Only calculate error for open loop data points
+      if (isNaN(target) || isNaN(measured)) {
+        return NaN;
+      }
       return measured - target;
     });
     
-    // Get throttle position data
-    const throttlePositionsRaw = data.map(row => parseFloat(row['Throttle Position (%)']) || 0);
+    // Get throttle position data (filtered for open loop mode)
+    const throttlePositionsRaw = data.map((row, idx) => {
+      const target = parseFloat(row[columns.targetAFR]) || 0;
+      // Only include throttle data for open loop mode
+      return target < OPEN_LOOP_THRESHOLD ? (parseFloat(row['Throttle Position (%)']) || 0) : NaN;
+    });
     
     // Always convert lambda to AFR (AFR = lambda × 14.7)
     const conversionFactor = this.AFR_CONVERSION_FACTOR;
@@ -511,7 +535,7 @@ const AFRAnalysisTab = {
     if (errorChartEl) {
       const errorDatasets = [
         {
-          label: 'AFR Error (%)',
+          label: 'AFR Deviation from Target (%)',
           data: afrErrors, // Already contains percent deviation
           borderColor: 'rgb(220, 53, 69)',
           backgroundColor: 'rgba(220, 53, 69, 0.1)',
@@ -601,7 +625,7 @@ const AFRAnalysisTab = {
               position: 'left',
               title: {
                 display: true,
-                text: 'Error (%)'
+                text: 'Deviation from Target (%)'
               }
             },
             y1: {
@@ -691,6 +715,10 @@ const AFRAnalysisTab = {
            aVal = a.time;
            bVal = b.time;
            break;
+         case 'duration':
+           aVal = a.duration || 0;
+           bVal = b.duration || 0;
+           break;
          case 'targetAFR':
            aVal = a.targetAFR;
            bVal = b.targetAFR;
@@ -741,6 +769,7 @@ const AFRAnalysisTab = {
     // Column map for header updates
     const columnMap = {
       'time': 'time',
+      'duration': 'duration',
       'targetAFR': 'targetAFR',
       'measuredAFR': 'measuredAFR',
       'afrError': 'afrError',
@@ -755,6 +784,14 @@ const AFRAnalysisTab = {
     
     // Update header labels - use stored base text or extract from original HTML
     // Store base text in data attribute on first run to avoid extraction issues
+    document.querySelectorAll('#afr-afrTable th[data-sort="duration"]').forEach(th => {
+      if (!th.dataset.baseText) {
+        th.dataset.baseText = th.textContent.replace(/ ↑| ↓|↕/g, '').replace(/\(.*?\)/g, '').trim() || 'Duration';
+      }
+      const baseText = th.dataset.baseText;
+      const indicator = currentSortColumn === columnMap['duration'] ? sortIndicator : '';
+      th.textContent = `${baseText} ↕${indicator}`;
+    });
     document.querySelectorAll('#afr-afrTable th[data-sort="targetAFR"]').forEach(th => {
       if (!th.dataset.baseText) {
         // Store original base text on first access
@@ -783,8 +820,9 @@ const AFRAnalysisTab = {
     
     // Always apply AFR conversion factor (already set above)
     
-    // Clear table
+    // Clear table and reset selected row
     this.elements.afrTableBody.innerHTML = '';
+    this.selectedRow = null;
     
     // Populate table
     sortedEvents.forEach(event => {
@@ -798,10 +836,14 @@ const AFRAnalysisTab = {
       row.style.cursor = 'pointer';
       row.title = 'Click to zoom to this event';
       
-      // Display time with duration for grouped events
-      const timeDisplay = event.duration && event.duration > 0 
-        ? `${event.time.toFixed(2)} (${event.duration.toFixed(3)}s)`
-        : event.time.toFixed(2);
+      // Display time
+      const timeDisplay = event.time.toFixed(2);
+      
+      // Display duration in milliseconds for better precision
+      const durationMs = event.duration ? (event.duration * 1000) : 0;
+      const durationDisplay = durationMs > 0 
+        ? durationMs.toFixed(1) + ' ms'
+        : '0.0 ms';
       
       // Always convert lambda values to AFR
       const targetDisplay = event.targetAFR * conversionFactor;
@@ -821,6 +863,7 @@ const AFRAnalysisTab = {
       
       row.innerHTML = `
         <td>${timeDisplay}</td>
+        <td>${durationDisplay}</td>
         <td>${targetDisplay.toFixed(decimalPlaces)}</td>
         <td>${measuredDisplay.toFixed(decimalPlaces)}</td>
         <td>${errorDisplay.toFixed(decimalPlaces)}</td>
@@ -828,8 +871,17 @@ const AFRAnalysisTab = {
         <td><span class="severity-badge ${eventTypeClass}">${event.eventType}</span></td>
       `;
       
-      // Add click handler to zoom to event
+      // Add click handler to zoom to event and highlight row
       row.addEventListener('click', () => {
+        // Remove highlight from previously selected row
+        if (this.selectedRow && this.selectedRow !== row) {
+          this.selectedRow.style.backgroundColor = '';
+        }
+        
+        // Highlight clicked row
+        row.style.backgroundColor = '#b3d9ff';
+        this.selectedRow = row;
+        
         const eventTime = parseFloat(row.dataset.eventTime);
         const eventDuration = parseFloat(row.dataset.eventDuration);
         if (typeof zoomChartsToEvent === 'function') {
@@ -837,12 +889,16 @@ const AFRAnalysisTab = {
         }
       });
       
-      // Add hover effect
+      // Add hover effect (only if not selected)
       row.addEventListener('mouseenter', () => {
-        row.style.backgroundColor = '#e8f4f8';
+        if (this.selectedRow !== row) {
+          row.style.backgroundColor = '#e8f4f8';
+        }
       });
       row.addEventListener('mouseleave', () => {
-        row.style.backgroundColor = '';
+        if (this.selectedRow !== row) {
+          row.style.backgroundColor = '';
+        }
       });
       
       this.elements.afrTableBody.appendChild(row);
@@ -852,6 +908,7 @@ const AFRAnalysisTab = {
   handleSort(column) {
     const columnMap = {
       'time': 'time',
+      'duration': 'duration',
       'targetAFR': 'targetAFR',
       'measuredAFR': 'measuredAFR',
       'afrError': 'afrError',

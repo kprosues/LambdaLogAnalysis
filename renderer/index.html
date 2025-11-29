@@ -371,15 +371,15 @@
         </div>
         <!-- Statistics Panel -->
         <section class="statistics-panel">
-          <h2>Summary Statistics</h2>
+          <h2>Open Loop Fueling Accuracy (PE Mode)</h2>
           <div class="stats-grid">
             <div class="stat-card">
-              <div class="stat-label">Average Error</div>
-              <div class="stat-value" id="afr-avgError">0.000 λ</div>
+              <div class="stat-label">Average Deviation from Target</div>
+              <div class="stat-value" id="afr-avgError">0.0%</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Max Deviation</div>
-              <div class="stat-value" id="afr-maxLean">0.000 λ</div>
+              <div class="stat-value" id="afr-maxLean">0.0%</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Time in Target</div>
@@ -398,13 +398,13 @@
           <div class="charts-container">
             <div class="chart-wrapper">
               <div class="chart-header">
-                <h3>Target AFR vs Measured AFR</h3>
+                <h3>Target AFR vs Measured AFR (Open Loop Mode)</h3>
               </div>
               <canvas id="afr-targetChart"></canvas>
             </div>
             <div class="chart-wrapper">
               <div class="chart-header">
-                <h3>AFR Error Over Time</h3>
+                <h3>AFR Deviation from Target (Open Loop Mode)</h3>
               </div>
               <canvas id="afr-errorChart"></canvas>
             </div>
@@ -413,7 +413,7 @@
 
         <!-- AFR Events Table -->
         <section class="anomaly-section">
-          <h2>Air/Fuel Ratio Events Detail</h2>
+          <h2>Open Loop Fueling Events (PE Mode)</h2>
           <div class="table-controls">
             <input type="text" id="afr-searchInput" placeholder="Search..." class="search-input">
             <select id="afr-eventTypeFilter" class="filter-select">
@@ -428,6 +428,7 @@
               <thead>
                 <tr>
                   <th data-sort="time">Time (s) ↕</th>
+                  <th data-sort="duration">Duration ↕</th>
                   <th data-sort="targetAFR">Target AFR (λ) ↕</th>
                   <th data-sort="measuredAFR">Measured AFR (λ) ↕</th>
                   <th data-sort="afrError">Error (λ) ↕</th>
@@ -952,36 +953,67 @@
     
     function tryRegisterZoomPlugin() {
       if (chartJsLoaded && zoomPluginLoaded) {
-        if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
-          try {
-            Chart.register(zoomPlugin);
-            console.log('Zoom plugin registered successfully');
-          } catch (e) {
-            // Plugin might already be registered, which is fine
-            if (!e.message || (!e.message.includes('already registered') && !e.message.includes('already exists'))) {
-              console.warn('Error registering zoom plugin:', e);
+        if (typeof Chart !== 'undefined') {
+          // Try different possible export names for the zoom plugin
+          let plugin = null;
+          if (typeof zoomPlugin !== 'undefined') {
+            plugin = zoomPlugin;
+          } else if (typeof ChartZoom !== 'undefined') {
+            plugin = ChartZoom;
+          } else if (typeof window.zoomPlugin !== 'undefined') {
+            plugin = window.zoomPlugin;
+          } else if (typeof window.ChartZoom !== 'undefined') {
+            plugin = window.ChartZoom;
+          }
+          
+          if (plugin) {
+            try {
+              Chart.register(plugin);
+              console.log('Zoom plugin registered successfully');
+            } catch (e) {
+              // Plugin might already be registered, which is fine
+              if (!e.message || (!e.message.includes('already registered') && !e.message.includes('already exists'))) {
+                console.warn('Error registering zoom plugin:', e);
+              }
             }
+          } else {
+            console.warn('Zoom plugin not found. Available globals:', Object.keys(window).filter(k => k.toLowerCase().includes('zoom') || k.toLowerCase().includes('chart')));
           }
         } else {
-          console.warn('Chart.js or zoom plugin not available after both scripts loaded');
+          console.warn('Chart.js not available after script loaded');
         }
       }
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" onload="chartJsLoaded = true; tryRegisterZoomPlugin();"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" onload="zoomPluginLoaded = true; tryRegisterZoomPlugin();"></script>
   <script>
     // Fallback: try to register after a short delay
     document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
-        if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
-          try {
-            Chart.register(zoomPlugin);
-            console.log('Zoom plugin registered on DOMContentLoaded (fallback)');
-          } catch (e) {
-            // Plugin might already be registered, which is fine
-            if (!e.message || (!e.message.includes('already registered') && !e.message.includes('already exists'))) {
-              // Only warn if it's not already registered
+        if (typeof Chart !== 'undefined') {
+          // Try different possible export names for the zoom plugin
+          let plugin = null;
+          if (typeof zoomPlugin !== 'undefined') {
+            plugin = zoomPlugin;
+          } else if (typeof ChartZoom !== 'undefined') {
+            plugin = ChartZoom;
+          } else if (typeof window.zoomPlugin !== 'undefined') {
+            plugin = window.zoomPlugin;
+          } else if (typeof window.ChartZoom !== 'undefined') {
+            plugin = window.ChartZoom;
+          }
+          
+          if (plugin) {
+            try {
+              Chart.register(plugin);
+              console.log('Zoom plugin registered on DOMContentLoaded (fallback)');
+            } catch (e) {
+              // Plugin might already be registered, which is fine
+              if (!e.message || (!e.message.includes('already registered') && !e.message.includes('already exists'))) {
+                // Only warn if it's not already registered
+              }
             }
           }
         }

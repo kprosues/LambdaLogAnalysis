@@ -16,6 +16,7 @@ const IntakeAirTemperatureTab = {
   charts: {},
   chartOriginalRanges: {},
   currentSort: { column: null, direction: 'asc' },
+  selectedRow: null, // Track currently selected row
 
   initialize() {
     // Get DOM elements for this tab
@@ -508,6 +509,9 @@ const IntakeAirTemperatureTab = {
 
     // Render table
     if (this.elements.iatTableBody) {
+      // Reset selected row when updating table
+      this.selectedRow = null;
+      
       this.elements.iatTableBody.innerHTML = filteredEvents.map((event, idx) => {
         const duration = event.duration ? ` (${event.duration.toFixed(3)}s)` : '';
         const severityBadge = this.getSeverityBadge(event.severity);
@@ -532,11 +536,33 @@ const IntakeAirTemperatureTab = {
 
       // Add click handlers for zoom
       this.elements.iatTableBody.querySelectorAll('tr[data-event-time]').forEach(row => {
+        // Add click handler to zoom to event and highlight row
         row.addEventListener('click', () => {
+          // Remove highlight from previously selected row
+          if (this.selectedRow && this.selectedRow !== row) {
+            this.selectedRow.style.backgroundColor = '';
+          }
+          
+          // Highlight clicked row
+          row.style.backgroundColor = '#b3d9ff';
+          this.selectedRow = row;
+          
           const eventTime = parseFloat(row.dataset.eventTime);
           const eventDuration = parseFloat(row.dataset.eventDuration) || 0;
           if (window.zoomChartsToEvent) {
             window.zoomChartsToEvent(eventTime, eventDuration, 3);
+          }
+        });
+        
+        // Add hover effect (only if not selected)
+        row.addEventListener('mouseenter', () => {
+          if (this.selectedRow !== row) {
+            row.style.backgroundColor = '#e8f4f8';
+          }
+        });
+        row.addEventListener('mouseleave', () => {
+          if (this.selectedRow !== row) {
+            row.style.backgroundColor = '';
           }
         });
       });

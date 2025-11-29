@@ -92,9 +92,82 @@ class TuneFileParser {
    */
   getTable(mapId) {
     const param = this.getParameter(mapId);
-    if (Array.isArray(param) && param.length > 0 && Array.isArray(param[0])) {
-      return param;
+    if (!param) return null;
+    
+    // If it's already a 2D array, ensure all values are numbers
+    if (Array.isArray(param) && param.length > 0) {
+      // Check if first element is an array (2D table)
+      if (Array.isArray(param[0])) {
+        // Convert to proper 2D array of numbers
+        return param.map(row => {
+          if (Array.isArray(row)) {
+            return row.map(val => {
+              const num = parseFloat(val);
+              return isNaN(num) ? 0 : num;
+            });
+          } else if (typeof row === 'string') {
+            // Handle case where row might be a string representation
+            try {
+              const parsed = JSON.parse(row);
+              if (Array.isArray(parsed)) {
+                return parsed.map(val => {
+                  const num = parseFloat(val);
+                  return isNaN(num) ? 0 : num;
+                });
+              }
+            } catch (e) {
+              // Not a JSON string, try splitting
+              return row.split(',').map(val => {
+                const num = parseFloat(val.trim());
+                return isNaN(num) ? 0 : num;
+              });
+            }
+          }
+          return row;
+        });
+      } else if (typeof param[0] === 'string') {
+        // All rows are strings - need to parse each one
+        console.log(`Table ${mapId}: Rows are strings, parsing...`);
+        return param.map(row => {
+          if (typeof row === 'string') {
+            try {
+              // Try parsing as JSON array first
+              const parsed = JSON.parse(row);
+              if (Array.isArray(parsed)) {
+                return parsed.map(val => {
+                  const num = parseFloat(val);
+                  return isNaN(num) ? 0 : num;
+                });
+              }
+            } catch (e) {
+              // Not JSON, try comma-separated values
+              const values = row.split(',').map(val => {
+                const num = parseFloat(val.trim());
+                return isNaN(num) ? 0 : num;
+              });
+              if (values.length > 0) {
+                return values;
+              }
+            }
+          } else if (Array.isArray(row)) {
+            return row.map(val => {
+              const num = parseFloat(val);
+              return isNaN(num) ? 0 : num;
+            });
+          }
+          // Fallback: try to convert single value
+          const num = parseFloat(row);
+          return isNaN(num) ? [0] : [num];
+        });
+      } else {
+        // 1D array, return as-is but convert to numbers
+        return param.map(val => {
+          const num = parseFloat(val);
+          return isNaN(num) ? 0 : num;
+        });
+      }
     }
+    
     return null;
   }
 
