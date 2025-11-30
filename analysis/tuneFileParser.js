@@ -7,6 +7,16 @@ class TuneFileParser {
     this.metadata = {};
   }
 
+  parseNumericRow(rowString) {
+    if (typeof rowString !== 'string') {
+      return [];
+    }
+    return rowString
+      .split(',')
+      .map(item => parseFloat(item.trim()))
+      .filter(val => !isNaN(val));
+  }
+
   /**
    * Parse a JSON tune file
    * @param {string} jsonContent - JSON content of the tune file
@@ -79,8 +89,34 @@ class TuneFileParser {
    */
   getArray(mapId) {
     const param = this.getParameter(mapId);
+    if (!param) return null;
+
     if (Array.isArray(param)) {
-      return param;
+      let values = [];
+      param.forEach(item => {
+        if (Array.isArray(item)) {
+          values = values.concat(item);
+        } else if (typeof item === 'string') {
+          const parsed = this.parseNumericRow(item);
+          if (parsed.length > 0) {
+            values = values.concat(parsed);
+          } else {
+            const num = parseFloat(item);
+            if (!isNaN(num)) {
+              values.push(num);
+            }
+          }
+        } else if (typeof item === 'number') {
+          values.push(item);
+        }
+      });
+
+      if (values.length > 0) {
+        return values.map(val => {
+          const num = parseFloat(val);
+          return isNaN(num) ? 0 : num;
+        });
+      }
     }
     return null;
   }
@@ -169,6 +205,22 @@ class TuneFileParser {
     }
     
     return null;
+  }
+
+  /**
+   * Get a deep clone of the raw tune data (for modifications/downloads)
+   * @returns {Object|null} - Deep clone of the tune data or null if not loaded
+   */
+  getRawTuneDataClone() {
+    if (!this.tuneData) {
+      return null;
+    }
+    try {
+      return JSON.parse(JSON.stringify(this.tuneData));
+    } catch (error) {
+      console.error('Error cloning tune data:', error);
+      return null;
+    }
   }
 
   /**

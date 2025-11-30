@@ -295,6 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
   tabManager.registerTab('knock', KnockAnalysisTab, knockDetector);
   tabManager.registerTab('boost', BoostControlTab, boostAnalyzer);
   tabManager.registerTab('afr', AFRAnalysisTab, afrAnalyzer);
+  tabManager.registerTab('autotune', AutotuneTab, null);
   tabManager.registerTab('fueltrim', FuelTrimTab, fuelTrimAnalyzer);
   tabManager.registerTab('longtermfueltrim', LongTermFuelTrimTab, longTermFuelTrimAnalyzer);
   tabManager.registerTab('iam', IAMAnalysisTab, iamAnalyzer);
