@@ -1,6 +1,6 @@
 {
   "name": "ecu-log-analysis-tool",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "description": "Desktop application for analyzing ProjectLambda Subaru WRX STi log files and detecting anomalies",
   "main": "main.js",
   "scripts": {
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "com.eculoganalysis.tool",
-    "productName": "ECU Log Analysis Tool",
+    "productName": "ProjectLambda Log Analysis Tool",
     "icon": "assets/icon.png",
     "directories": {
       "output": "dist"
@@ -62,7 +62,7 @@
         "deb"
       ],
       "category": "Utility",
-      "maintainer": "ECU Log Analysis Tool <eculoganalysis@example.com>"
+      "maintainer": "ProjectLambda Log Analysis Tool <eculoganalysis@example.com>"
     },
     "nsis": {
       "oneClick": false,

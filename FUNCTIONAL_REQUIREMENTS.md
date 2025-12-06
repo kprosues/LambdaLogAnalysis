@@ -1,6 +1,6 @@
-# ECU Log Analysis Tool - Functional Requirements
+# ProjectLambda Log Analysis Tool - Functional Requirements
 
-This document outlines all functional requirements for the ECU Log Analysis Tool with their acceptance criteria, implementation details, and framework decisions.
+This document outlines all functional requirements for the ProjectLambda Log Analysis Tool with their acceptance criteria, implementation details, and framework decisions.
 
 ---
 
@@ -22,7 +22,8 @@ This document outlines all functional requirements for the ECU Log Analysis Tool
 ### Build Configuration
 - **Platform Support**: Windows (portable), macOS (dmg/zip), Linux (AppImage/deb)
 - **App ID**: `com.eculoganalysis.tool`
-- **Product Name**: "ECU Log Analysis Tool"
+- **Product Name**: "ProjectLambda Log Analysis Tool"
+- **Version**: 3.0.0
 - **Default Window Size**: 1400x900 pixels
 
 ---
@@ -54,9 +55,15 @@ ECULogAnalysisTool/
         ├── knockAnalysisTab.js
         ├── boostControlTab.js
         ├── afrAnalysisTab.js
+        ├── fuelingTab.js     # Combined AFR + Autotune tab wrapper
         ├── fuelTrimTab.js
         ├── longTermFuelTrimTab.js
-        └── autotuneTab.js    # Autotune tab module
+        ├── combinedFuelTrimTab.js # Combined Short Term + Long Term tab wrapper
+        ├── autotuneTab.js    # Autotune tab module
+        ├── iamAnalysisTab.js
+        ├── loadLimitTab.js
+        ├── coolantTemperatureTab.js
+        └── intakeAirTemperatureTab.js
 ```
 
 ### Design Patterns
@@ -70,7 +77,7 @@ ECULogAnalysisTool/
 1. User loads CSV file → Electron main process reads file
 2. File content passed to renderer → DataProcessor parses CSV
 3. Parsed data stored in DataProcessor instance
-4. Analyzers (KnockDetector, BoostControlAnalyzer, AFRAnalyzer, FuelTrimAnalyzer, LongTermFuelTrimAnalyzer) process data
+4. Analyzers (KnockDetector, BoostControlAnalyzer, AFRAnalyzer, FuelTrimAnalyzer, LongTermFuelTrimAnalyzer, IAMAnalyzer, LoadLimitAnalyzer, CoolantTemperatureAnalyzer, IntakeAirTemperatureAnalyzer) process data
 5. Results cached in TabManager
 6. Active tab module renders charts, statistics, and tables
 7. User interactions (zoom, filter, sort) update UI without re-analysis
@@ -347,12 +354,13 @@ ECULogAnalysisTool/
 **Description:** The application must show progress during file processing.
 
 **Implementation Details:**
-- **Progress UI**: Inline progress bar section (not modal) with text and percentage
+- **Progress UI**: Progress bar section integrated into header with text and percentage
 - **Update Mechanism**: `updateProgress(percent, text)` function
   - Uses `requestAnimationFrame()` for smooth UI updates
   - Clamps percentage to 0-100% range
   - Updates progress bar width via CSS
   - Updates text and percentage display elements
+  - Progress bar displayed in header with compact styling (4px height, smaller text)
 - **Progress Stages**:
   - 0%: "Starting..."
   - 10-40%: "Parsing CSV file..." (mapped from PapaParse progress)
@@ -368,6 +376,7 @@ ECULogAnalysisTool/
   - Mapped to 10-40% of total processing
   - Throttled to update every 50 rows or 0.5% change
 - **Completion**: Progress bar hidden after 500ms delay to show 100%
+- **Header Integration**: Progress bar appears in header below file controls, with border-top separator
 
 **Acceptance Criteria:**
 - Progress bar appears during file processing
@@ -427,11 +436,11 @@ ECULogAnalysisTool/
 ---
 
 ## **FR13: Tab Navigation System**
-**Description:** Provide a tabbed interface to switch between the Log Score overview and all detailed analysis views (Knock Analysis, Boost Control, Air/Fuel Ratio, Short Term Fuel Trim, and Long Term Fuel Trim).
+**Description:** Provide a tabbed interface to switch between the Log Score overview and all detailed analysis views.
 
 **Acceptance Criteria:**
 - Tab navigation buttons are displayed at the top of the content area
-- Six tabs are available: "Log Score", "Knock Analysis", "Boost Control", "Air/Fuel Ratio", "Short Term Fuel Trim", and "Long Term Fuel Trim"
+- Ten tabs are available: "Log Score", "Knock Analysis", "Boost Control", "Fueling" (combined AFR + Autotune), "Fuel Trim" (combined Short Term + Long Term), "IAM Analysis", "Load Limit", "Coolant Temperature", and "Intake Air Temperature"
 - Active tab button is visually highlighted (different styling)
 - Clicking a tab button switches to that tab's content
 - Only one tab's content is visible at a time
@@ -453,9 +462,13 @@ ECULogAnalysisTool/
   tabManager.registerTab('logscore', LogScoreTab, null);
   tabManager.registerTab('knock', KnockAnalysisTab, knockDetector);
   tabManager.registerTab('boost', BoostControlTab, boostAnalyzer);
-  tabManager.registerTab('afr', AFRAnalysisTab, afrAnalyzer);
-  tabManager.registerTab('fueltrim', FuelTrimTab, fuelTrimAnalyzer);
-  tabManager.registerTab('longtermfueltrim', LongTermFuelTrimTab, longTermFuelTrimAnalyzer);
+  tabManager.registerTab('fueling', FuelingTab, afrAnalyzer); // Combined AFR + Autotune tab
+  tabManager.registerTab('fueltrim', CombinedFuelTrimTab, fuelTrimAnalyzer); // Combined Short Term + Long Term tab
+  tabManager.longTermFuelTrimAnalyzer = longTermFuelTrimAnalyzer; // Stored separately for access
+  tabManager.registerTab('iam', IAMAnalysisTab, iamAnalyzer);
+  tabManager.registerTab('loadlimit', LoadLimitTab, loadLimitAnalyzer);
+  tabManager.registerTab('coolanttemp', CoolantTemperatureTab, coolantTemperatureAnalyzer);
+  tabManager.registerTab('iat', IntakeAirTemperatureTab, intakeAirTemperatureAnalyzer);
   ```
 - **Tab Storage**: `Map<tabId, {module, analyzer, initialized}>`
 - **Cache Structure**: `Map<tabId, analysisResults>`
@@ -704,9 +717,10 @@ ECULogAnalysisTool/
   ```
 - **Module Registration**:
   - Tabs registered in `app.js` on DOMContentLoaded
-  - Each tab gets unique ID ('knock', 'boost')
+  - Each tab gets unique ID ('knock', 'boost', 'fueling', 'fueltrim', 'iam', 'loadlimit', 'coolanttemp', 'iat')
   - Analyzer instance created and passed to tab
-  - Module object (KnockAnalysisTab, BoostControlTab) passed to TabManager
+  - Module object (KnockAnalysisTab, BoostControlTab, FuelingTab, CombinedFuelTrimTab, etc.) passed to TabManager
+  - Some tabs are wrapper modules that combine multiple analysis types (FuelingTab wraps AFR + Autotune, CombinedFuelTrimTab wraps Short Term + Long Term)
 - **Element Namespacing**:
   - All DOM elements prefixed with tab ID (e.g., `knock-totalKnockEvents`, `boost-maxOvershoot`)
   - Prevents ID conflicts between tabs
@@ -758,29 +772,51 @@ ECULogAnalysisTool/
 - Boost Control tab has its own:
   - Statistics panel with boost-specific metrics
   - Charts (boost target vs actual, boost error, wastegate)
+  - Heatmap table showing boost target coverage (RPM x TPS bins)
   - Table with boost control events
   - Search input and event type filter
   - Throttle position toggle
-- Air/Fuel Ratio tab has its own:
-  - Statistics panel with AFR-specific metrics
-  - Charts (target vs measured AFR, AFR error)
-  - Table with AFR events
-  - Search input and event type filter
-  - AFR/Lambda unit toggle
-  - Data smoothing toggle
-- Short Term Fuel Trim tab has its own:
-  - Statistics panel with fuel trim-specific metrics
-  - Charts (fuel trim over time)
-  - Table with fuel trim events
-  - Search input and event type filter
-  - Throttle position toggle
-- Long Term Fuel Trim tab has its own:
-  - Statistics panel with fuel trim-specific metrics
-  - Charts (fuel trim over time)
-  - Table with fuel trim events
-  - Search input and event type filter
-  - Throttle position toggle
-- UI elements are properly namespaced with tab ID prefix (e.g., "logscore-", "knock-", "boost-", "afr-", "fueltrim-", "longtermfueltrim-")
+- Fueling tab (combined AFR + Autotune) has its own:
+  - AFR Analysis section:
+    - Statistics panel with AFR-specific metrics
+    - Charts (target vs measured AFR, AFR error)
+    - Table with AFR events
+    - Search input and event type filter
+    - AFR/Lambda unit toggle
+  - Autotune section:
+    - Form inputs (min samples, change limit, base tune file, output filename)
+    - Open loop and closed loop summary tables
+    - Tune file download functionality
+- Fuel Trim tab (combined Short Term + Long Term) has its own:
+  - Short Term Fuel Trim section:
+    - Statistics panel with fuel trim-specific metrics
+    - Charts (fuel trim over time)
+    - Table with fuel trim events
+    - Search input and event type filter
+    - Throttle position toggle
+  - Long Term Fuel Trim section:
+    - Statistics panel with fuel trim-specific metrics
+    - Charts (fuel trim over time)
+    - Table with fuel trim events
+    - Search input and event type filter
+    - Throttle position toggle
+- IAM Analysis tab has its own:
+  - Statistics panel with IAM-specific metrics
+  - Charts and tables for IAM analysis
+  - Search and filter controls
+- Load Limit tab has its own:
+  - Statistics panel with load limit-specific metrics
+  - Charts and tables for load limit analysis
+  - Search and filter controls
+- Coolant Temperature tab has its own:
+  - Statistics panel with coolant temperature-specific metrics
+  - Charts and tables for coolant temperature analysis
+  - Search and filter controls
+- Intake Air Temperature tab has its own:
+  - Statistics panel with intake air temperature-specific metrics
+  - Charts and tables for intake air temperature analysis
+  - Search and filter controls
+- UI elements are properly namespaced with tab ID prefix (e.g., "logscore-", "knock-", "boost-", "fueling-", "fueltrim-", "iam-", "loadlimit-", "coolanttemp-", "iat-")
 - Each tab's controls only affect that tab's content
 - Switching tabs preserves filter/search state within each tab
 - Table sorting state is maintained per tab independently
@@ -1027,9 +1063,13 @@ ECULogAnalysisTool/
   5. AFR Analysis (65% progress): `afrAnalyzer.analyze()`
   6. Short Term Fuel Trim Analysis (67% progress): `fuelTrimAnalyzer.analyze()`
   7. Long Term Fuel Trim Analysis (68% progress): `longTermFuelTrimAnalyzer.analyze()`
-  8. UI Update (75% progress): Show content area, hide drop zone
-  9. Tab Rendering (80% progress): `tabManager.switchTab(activeTabId)`
-  10. Complete (100% progress): Hide progress bar after 500ms delay
+  8. IAM Analysis: `iamAnalyzer.analyze()`
+  9. Load Limit Analysis: `loadLimitAnalyzer.analyze()`
+  10. Coolant Temperature Analysis: `coolantTemperatureAnalyzer.analyze()`
+  11. Intake Air Temperature Analysis: `intakeAirTemperatureAnalyzer.analyze()`
+  12. UI Update (75% progress): Show content area, hide drop zone
+  13. Tab Rendering (80% progress): `tabManager.switchTab(activeTabId)`
+  14. Complete (100% progress): Hide progress bar after 500ms delay
 - **Cache Management**:
   - Cache cleared at start: `tabManager.clearCache()`
   - Results stored: `tabManager.cache.set('knock', {events})` and `tabManager.cache.set('boost', analysisResults)`
@@ -1053,6 +1093,10 @@ ECULogAnalysisTool/
 - AFR analysis runs during file processing (at 65% progress)
 - Short term fuel trim analysis runs during file processing (at 67% progress)
 - Long term fuel trim analysis runs during file processing (at 68% progress)
+- IAM analysis runs during file processing
+- Load limit analysis runs during file processing
+- Coolant temperature analysis runs during file processing
+- Intake air temperature analysis runs during file processing
 - Analysis results are cached for each tab
 - Active tab is rendered after file processing completes (at 80% progress)
 - Inactive tabs are not rendered until user switches to them
@@ -1115,7 +1159,8 @@ ECULogAnalysisTool/
 - **Table Header**: `#333` (dark gray with white text)
 - **Row Hover**: `#f5f5f5` (light gray)
 - **Loading Overlay**: `rgba(100, 100, 100, 0.85)` (semi-transparent gray)
-- **Progress Bar**: `#333` (dark gray) with gradient overlay
+- **Progress Bar**: `#333` (dark gray), `#4a9eff` (blue in dark mode)
+- **Progress Bar Container**: 4px height, compact styling in header
 - **Severity Badges**:
   - Mild: `#e0e0e0` background, `#333` text
   - Moderate: `#ccc` background, `#333` text
@@ -1129,7 +1174,7 @@ ECULogAnalysisTool/
 - **Body Text**: 14px, font-weight 400, color `#333`
 - **Stat Value**: 32px, font-weight 700, white text on dark background
 - **Stat Label**: 14px, opacity 0.9, white text on dark background
-- **File Name**: 14px, italic, color `#666`
+- **File Name**: 11px, italic, color `#666` (with ellipsis for long paths)
 - **Button Text**: 14px, font-weight 500
 - **Table Header**: 14px, font-weight 600, white text
 - **Table Cell**: 14px, font-weight 400
@@ -1137,6 +1182,8 @@ ECULogAnalysisTool/
 #### Spacing and Layout
 - **Container Padding**: 20px
 - **Header Padding**: 20px 30px
+- **Header Layout**: Flexbox with `header-left` and `header-right` sections
+- **File Names Section**: Vertical layout with 3px gap between file names
 - **Content Area Padding**: 30px
 - **Section Margins**: 30px bottom margin
 - **Grid Gaps**: 20px (stats grid, charts container)
@@ -1264,16 +1311,75 @@ ECULogAnalysisTool/
 
 **Progress Bar**
 - **Progress Section** (`.progress-section`):
-  - Background: white
-  - Padding: `15px 20px`
-  - Border-radius: `8px`
-  - Box-shadow: `0 2px 4px rgba(0, 0, 0, 0.1)`
+  - Width: 100%
+  - Padding: `8px 0 0 0`
+  - Margin-top: `8px`
+  - Border-top: `1px solid rgba(0, 0, 0, 0.1)` (separator in header)
+  - Transition: `opacity 0.3s ease`
+- **Progress Info** (`.progress-info`):
+  - Display: flex, space-between
+  - Margin-bottom: `6px`
+- **Progress Text/Percent**:
+  - Font-size: `12px` (smaller in header)
+  - Color: `#666` (light mode), `#999` (dark mode)
+- **Progress Bar Container** (`.progress-bar-container`):
+  - Height: `4px` (compact in header)
+  - Background: `rgba(0, 0, 0, 0.1)` (light mode), `rgba(255, 255, 255, 0.1)` (dark mode)
+  - Border-radius: `2px`
 - **Progress Bar** (`.progress-bar`):
-  - Background: `#333`
-  - Border-radius: `10px`
-  - Height: `20px`
+  - Background: `#333` (light mode), `#4a9eff` (dark mode)
+  - Border-radius: `2px`
+  - Height: `100%`
   - Transition: `width 0.4s ease-out`
-  - Box-shadow: `0 1px 3px rgba(0, 0, 0, 0.2)`
+
+**Collapsible Sections**
+- **Collapsible Header** (`.collapsible-header`):
+  - Display: flex, space-between, align-items center
+  - Cursor: pointer
+  - User-select: none
+  - Padding: `12px 16px`
+  - Margin: `10px 0 0 0`
+  - Background: `#f8f9fa` (light mode), `#2d2d2d` (dark mode)
+  - Border: `1px solid #e0e0e0` (light mode), `1px solid #444` (dark mode)
+  - Border-radius: `6px`
+  - Transition: `all 0.3s ease`
+  - Hover: background `#e9ecef`, border-color `#007bff`, color `#007bff`, transform `translateY(-1px)`, box-shadow
+- **Collapsible Header Collapsed** (`.collapsible-header.collapsed`):
+  - Background: `#f0f0f0` (light mode), `#252525` (dark mode)
+  - Border-style: dashed
+- **Collapse Icon** (`.collapse-icon`):
+  - Font-size: `16px`
+  - Transition: `transform 0.3s ease, color 0.3s ease`
+  - Margin-left: `10px`
+  - Color: `#666` (light mode), `#999` (dark mode)
+  - Rotated -90deg when collapsed
+- **Collapsible Content** (`.collapsible-content`):
+  - Overflow: hidden
+  - Transition: `max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease, padding 0.3s ease`
+  - Max-height: `10000px` when expanded
+  - Opacity: `1` when expanded, `0` when collapsed
+  - Margin-top: `20px` when expanded, `0` when collapsed
+- **Collapsible Content Collapsed** (`.collapsible-content.collapsed`):
+  - Max-height: `0`
+  - Opacity: `0`
+  - Margin-top: `0`
+  - Padding: `0`
+
+**Heatmap Tables**
+- **Heatmap Table** (`.heatmap-table`):
+  - Border-collapse: collapse
+  - Width: 100%
+  - Font-size: `12px`
+- **Heatmap Cell** (`.heatmap-cell-0` through `.heatmap-cell-9`):
+  - Color intensity based on logarithmic scaling
+  - Text-align: center
+  - Padding: `8px`
+  - Border: `1px solid rgba(0, 0, 0, 0.1)`
+  - Empty cells (0 hits): lightest color, no text
+- **Heatmap Stats** (`.heatmap-stats`):
+  - Display: flex, gap between items
+  - Margin-top: `10px`
+  - Font-size: `12px`
 
 **Severity Badges**
 - **Base Badge** (`.severity-badge`):
@@ -1328,6 +1434,9 @@ ECULogAnalysisTool/
 - **Sort Indicators**: Arrow symbols (↑ ↓) appended to column headers
 - **Clickable Rows**: Pointer cursor, hover background `#e8f4f8`, tooltip text
 - **Error/Warning Panels**: Yellow/amber background, expandable details sections
+- **Collapsible Headers**: Hover effects with color change, border highlight, transform, icon rotation
+- **Heatmap Cells**: Color intensity based on logarithmic scaling (0-9 color classes)
+- **File Name Tooltips**: Native browser tooltips showing full file paths
 
 #### Accessibility Considerations
 - **Color Contrast**: High contrast text on backgrounds (white on `#333`, `#333` on white)
@@ -1773,7 +1882,7 @@ ECULogAnalysisTool/
 
 ## Summary
 
-This document contains 42 functional requirements covering:
+This document contains 47 functional requirements covering:
 - File loading and parsing (FR1-FR2)
 - Knock detection and analysis (FR3-FR8)
 - Progress tracking and data validation (FR9-FR10)
@@ -1783,6 +1892,10 @@ This document contains 42 functional requirements covering:
 - Air/Fuel ratio analysis (FR24)
 - Short Term Fuel Trim analysis (FR30-FR34)
 - Long Term Fuel Trim analysis (FR35-FR39)
+- IAM Analysis (additional tab)
+- Load Limit Analysis (additional tab)
+- Coolant Temperature Analysis (additional tab)
+- Intake Air Temperature Analysis (additional tab)
 - Global data smoothing (FR25)
 - Click-to-zoom on table rows (FR26)
 - Throttle position display (FR27)
@@ -1792,6 +1905,11 @@ This document contains 42 functional requirements covering:
 - Loading overlays and visual feedback (FR40)
 - Log Score aggregation and navigation (FR41)
 - Autotune fuel base analysis and tune modification (FR42)
+- App version display (FR43)
+- Collapsible sections (FR44)
+- Boost control heatmap table (FR45)
+- File name tooltips (FR46)
+- Header layout improvements (FR47)
 
 Each requirement includes detailed acceptance criteria and implementation details to ensure proper implementation and testing. The document also includes framework decisions, architecture overview, technical specifications for developers, and a comprehensive UI/UX Design System section documenting color palettes, typography, spacing, component styling, interactive states, and responsive design patterns.
 

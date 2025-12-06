@@ -133,6 +133,7 @@ app.on('window-all-closed', () => {
 // Handle file dialog
 ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Log File',
     properties: ['openFile'],
     filters: [
       { name: 'CSV Files', extensions: ['csv'] },
@@ -165,6 +166,7 @@ ipcMain.handle('read-file', async (event, filePath) => {
 // Handle tune file dialog
 ipcMain.handle('open-tune-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Tune File',
     properties: ['openFile'],
     filters: [
       { name: 'Tune Files', extensions: ['tune'] },
@@ -183,5 +185,17 @@ ipcMain.handle('open-tune-file-dialog', async () => {
     }
   }
   return { success: false, canceled: true };
+});
+
+// Handle app version request
+ipcMain.handle('get-app-version', async () => {
+  try {
+    const packageJsonPath = path.join(__dirname, 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    return packageJson.version;
+  } catch (error) {
+    console.error('Error reading app version:', error);
+    return 'Unknown';
+  }
 });
 

@@ -47,7 +47,7 @@ const LongTermFuelTrimTab = {
         this.showThrottle = e.target.checked;
         
         // Show loading overlay immediately
-        const tabContent = document.querySelector('.tab-content[data-tab="longtermfueltrim"]');
+        const tabContent = document.querySelector('.tab-content[data-tab="fueltrim"]');
         if (tabContent) {
           tabContent.classList.add('loading');
           const overlay = tabContent.querySelector('.tab-loading-overlay');
@@ -113,7 +113,7 @@ const LongTermFuelTrimTab = {
   
   showColumnInfo() {
     let dataProcessor = null;
-    const analyzer = tabManager ? tabManager.getTabAnalyzer('longtermfueltrim') : null;
+    const analyzer = tabManager ? tabManager.longTermFuelTrimAnalyzer : null;
     
     if (analyzer && analyzer.dataProcessor) {
       dataProcessor = analyzer.dataProcessor;
@@ -122,7 +122,7 @@ const LongTermFuelTrimTab = {
     }
     
     if (!dataProcessor) {
-      const statsPanel = document.querySelector('.tab-content[data-tab="longtermfueltrim"] .statistics-panel');
+      const statsPanel = document.querySelector('.tab-content[data-tab="fueltrim"] .statistics-panel');
       if (statsPanel) {
         let infoDiv = document.getElementById('longtermfueltrim-column-info');
         if (!infoDiv) {
@@ -151,7 +151,7 @@ const LongTermFuelTrimTab = {
       return colLower.includes('trim') || colLower.includes('fuel');
     });
     
-    const statsPanel = document.querySelector('.tab-content[data-tab="longtermfueltrim"] .statistics-panel');
+    const statsPanel = document.querySelector('.tab-content[data-tab="fueltrim"] .statistics-panel');
     if (statsPanel) {
       let infoDiv = document.getElementById('longtermfueltrim-column-info');
       if (!infoDiv) {
@@ -171,7 +171,7 @@ const LongTermFuelTrimTab = {
   },
 
   updateStatistics() {
-    const analyzer = tabManager.getTabAnalyzer('longtermfueltrim');
+    const analyzer = tabManager.longTermFuelTrimAnalyzer;
     if (!analyzer) {
       console.warn('Long term fuel trim analyzer not found');
       return;
@@ -199,7 +199,7 @@ const LongTermFuelTrimTab = {
   },
 
   renderCharts(preserveZoom = false) {
-    const analyzer = tabManager.getTabAnalyzer('longtermfueltrim');
+    const analyzer = tabManager.longTermFuelTrimAnalyzer;
     if (!analyzer) {
       console.warn('Long term fuel trim analyzer not found for charts');
       return;
@@ -520,7 +520,7 @@ const LongTermFuelTrimTab = {
   },
 
   updateTable() {
-    const analyzer = tabManager.getTabAnalyzer('longtermfueltrim');
+    const analyzer = tabManager.longTermFuelTrimAnalyzer;
     if (!analyzer || !this.elements.fuelTrimTableBody) return;
     
     const analysisData = tabManager.getCachedAnalysis('longtermfueltrim');

@@ -31,13 +31,34 @@ header {
   margin-bottom: 20px;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 body.dark-mode header {
   background: #2d2d2d;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.header-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+header h1 {
+  color: #333;
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0;
+  padding: 0;
+  line-height: 1.2;
+  transition: color 0.3s ease;
+}
+
+body.dark-mode header h1 {
+  color: #e0e0e0;
 }
 
 .app-logo {
@@ -52,21 +73,26 @@ body.dark-mode header {
   opacity: 0.8;
 }
 
-header h1 {
-  color: #333;
-  font-size: 28px;
-  font-weight: 600;
-  transition: color 0.3s ease;
-}
-
-body.dark-mode header h1 {
-  color: #e0e0e0;
+.header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .file-controls {
   display: flex;
   align-items: center;
   gap: 15px;
+  flex-wrap: wrap;
+  min-width: 0; /* Allow flex items to shrink */
+}
+
+.file-names {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
 }
 
 .btn {
@@ -137,8 +163,17 @@ body.dark-mode .btn-success:hover {
 
 .file-name {
   color: #666;
-  font-size: 14px;
+  font-size: 11px;
   font-style: italic;
+  max-width: 450px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
+body.dark-mode .file-name {
+  color: #999;
 }
 
 .drop-zone {
@@ -445,6 +480,100 @@ body.dark-mode .anomaly-section h2 {
   color: #e0e0e0;
 }
 
+/* Collapsible header styles */
+.collapsible-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  padding: 12px 16px;
+  margin-bottom: 0;
+  margin-top: 10px;
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+  color: #333;
+}
+
+.collapsible-header:hover {
+  background-color: #e9ecef;
+  border-color: #007bff;
+  color: #007bff;
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+body.dark-mode .collapsible-header {
+  background-color: #2d2d2d;
+  border-color: #444;
+  color: #e0e0e0;
+}
+
+body.dark-mode .collapsible-header:hover {
+  background-color: #3a3a3a;
+  border-color: #4a9eff;
+  color: #4a9eff;
+  box-shadow: 0 2px 4px rgba(74, 158, 255, 0.2);
+}
+
+.collapsible-header .collapse-icon {
+  font-size: 16px;
+  transition: transform 0.3s ease, color 0.3s ease;
+  margin-left: 10px;
+  color: #666;
+  font-weight: bold;
+}
+
+body.dark-mode .collapsible-header .collapse-icon {
+  color: #999;
+}
+
+.collapsible-header:hover .collapse-icon {
+  color: #007bff;
+}
+
+body.dark-mode .collapsible-header:hover .collapse-icon {
+  color: #4a9eff;
+}
+
+/* Collapsed state - icon rotated */
+.collapsible-header.collapsed .collapse-icon {
+  transform: rotate(-90deg);
+}
+
+/* Additional visual cue for collapsed state */
+.collapsible-header.collapsed {
+  background-color: #f0f0f0;
+  border-style: dashed;
+}
+
+body.dark-mode .collapsible-header.collapsed {
+  background-color: #252525;
+  border-color: #555;
+}
+
+/* Collapsible content styles */
+.collapsible-content {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease, padding-top 0.3s ease, padding-bottom 0.3s ease;
+  max-height: 10000px;
+  opacity: 1;
+  margin-top: 20px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.collapsible-content.collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
 .table-controls {
   display: flex;
   gap: 15px;
@@ -614,52 +743,74 @@ body.dark-mode .anomaly-section h2 {
   margin: 0;
 }
 
-/* Progress Bar Section (part of page, not modal) */
+/* Progress Bar Section (inside header) */
 .progress-section {
-  background: white;
-  padding: 15px 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 20px;
+  width: 100%;
+  padding: 8px 0 0 0;
+  margin-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  transition: opacity 0.3s ease;
+  overflow: hidden;
+}
+
+body.dark-mode .progress-section {
+  border-top-color: rgba(255, 255, 255, 0.1);
 }
 
 .progress-info {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .progress-text {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
-  color: #333;
+  color: #666;
   margin: 0;
+  transition: color 0.3s ease;
+}
+
+body.dark-mode .progress-text {
+  color: #999;
 }
 
 .progress-percent {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
-  color: #333;
+  color: #666;
   margin: 0;
+  transition: color 0.3s ease;
+}
+
+body.dark-mode .progress-percent {
+  color: #999;
 }
 
 .progress-section .progress-bar-container {
   width: 100%;
-  height: 20px;
-  background: #e0e0e0;
-  border-radius: 10px;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
   overflow: hidden;
   margin: 0;
+}
+
+body.dark-mode .progress-section .progress-bar-container {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .progress-section .progress-bar {
   height: 100%;
   width: 0%;
   background: #333;
-  border-radius: 10px;
+  border-radius: 2px;
   transition: width 0.4s ease-out;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+body.dark-mode .progress-section .progress-bar {
+  background: #4a9eff;
 }
 
 /* Content Area Loading State */
@@ -1178,6 +1329,19 @@ body.dark-mode .heatmap-table th {
   color: #fff;
 }
 
+/* Knock event highlighting - bright red */
+.heatmap-cell-knock {
+  background-color: #ff0000 !important;
+  color: #fff !important;
+  font-weight: bold;
+  border: 2px solid #cc0000 !important;
+}
+
+body.dark-mode .heatmap-cell-knock {
+  background-color: #ff3333 !important;
+  border-color: #ff0000 !important;
+}
+
 /* Dark mode adjustments for heatmap cells */
 body.dark-mode .heatmap-cell-0 {
   background-color: #2d2d2d;
@@ -1545,5 +1709,20 @@ body.dark-mode .fuel-change-stats span {
     font-size: 11px;
     gap: 10px;
   }
+}
+
+/* App Footer */
+#app-footer {
+  text-align: center;
+  padding: 10px;
+  color: #666;
+  font-size: 12px;
+  border-top: 1px solid #e0e0e0;
+  margin-top: 20px;
+}
+
+body.dark-mode #app-footer {
+  color: #999;
+  border-top-color: #444;
 }
 

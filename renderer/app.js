@@ -294,16 +294,19 @@ document.addEventListener('DOMContentLoaded', () => {
   tabManager.registerTab('logscore', LogScoreTab, null); // No analyzer needed
   tabManager.registerTab('knock', KnockAnalysisTab, knockDetector);
   tabManager.registerTab('boost', BoostControlTab, boostAnalyzer);
-  tabManager.registerTab('afr', AFRAnalysisTab, afrAnalyzer);
-  tabManager.registerTab('autotune', AutotuneTab, null);
-  tabManager.registerTab('fueltrim', FuelTrimTab, fuelTrimAnalyzer);
-  tabManager.registerTab('longtermfueltrim', LongTermFuelTrimTab, longTermFuelTrimAnalyzer);
+  tabManager.registerTab('fueling', FuelingTab, afrAnalyzer); // Combined AFR + Autotune tab
+  tabManager.registerTab('fueltrim', CombinedFuelTrimTab, fuelTrimAnalyzer); // Combined Short Term + Long Term tab
+  // Store long term analyzer separately so it can be accessed
+  tabManager.longTermFuelTrimAnalyzer = longTermFuelTrimAnalyzer;
   tabManager.registerTab('iam', IAMAnalysisTab, iamAnalyzer);
   tabManager.registerTab('loadlimit', LoadLimitTab, loadLimitAnalyzer);
   tabManager.registerTab('coolanttemp', CoolantTemperatureTab, coolantTemperatureAnalyzer);
   tabManager.registerTab('iat', IntakeAirTemperatureTab, intakeAirTemperatureAnalyzer);
   
   setupEventListeners();
+  
+  // Initialize collapsible sections
+  initializeCollapsibleSections();
   
   // Initially disable log file button until tune file is loaded
   if (openFileBtn) {
@@ -315,7 +318,62 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Set default active tab
   tabManager.switchTab('logscore');
+  
+  // Load and display app version
+  loadAppVersion();
 });
+
+function initializeCollapsibleSections() {
+  // Find all collapsible headers
+  const collapsibleHeaders = document.querySelectorAll('.collapsible-header');
+  
+  collapsibleHeaders.forEach(header => {
+    // Get the target content element
+    const targetId = header.getAttribute('data-target');
+    if (!targetId) return;
+    
+    const content = document.getElementById(targetId);
+    if (!content) return;
+    
+    // Set initial state - add collapsed class to header if content is collapsed
+    if (content.classList.contains('collapsed')) {
+      header.classList.add('collapsed');
+    }
+    
+    // Add click event listener
+    header.addEventListener('click', () => {
+      const isCollapsed = content.classList.contains('collapsed');
+      
+      if (isCollapsed) {
+        // Expand
+        content.classList.remove('collapsed');
+        header.classList.remove('collapsed');
+      } else {
+        // Collapse
+        content.classList.add('collapsed');
+        header.classList.add('collapsed');
+      }
+    });
+  });
+}
+
+async function loadAppVersion() {
+  try {
+    if (window.electronAPI && window.electronAPI.getAppVersion) {
+      const version = await window.electronAPI.getAppVersion();
+      const versionElement = document.getElementById('app-version');
+      if (versionElement) {
+        versionElement.textContent = version;
+      }
+    }
+  } catch (error) {
+    console.error('Error loading app version:', error);
+    const versionElement = document.getElementById('app-version');
+    if (versionElement) {
+      versionElement.textContent = 'Unknown';
+    }
+  }
+}
 
 function setupEventListeners() {
   // Open file button
@@ -510,7 +568,9 @@ async function handleOpenTuneFile() {
         // Update UI
         if (tuneFileName) {
           const fileName = result.path ? result.path.split(/[/\\]/).pop() : 'Tune file loaded';
+          const fullPath = result.path || 'Tune file loaded';
           tuneFileName.textContent = fileName;
+          tuneFileName.title = fullPath; // Tooltip with full path
           tuneFileName.style.display = 'inline';
         }
         
@@ -539,6 +599,13 @@ async function handleOpenTuneFile() {
           if (activeTabId) {
             tabManager.switchTab(activeTabId);
           }
+        } else {
+          // Automatically open log file dialog if no log file is loaded
+          console.log('No log file loaded. Automatically opening log file dialog...');
+          // Use setTimeout to ensure UI updates are complete before opening dialog
+          setTimeout(() => {
+            handleOpenFile();
+          }, 100);
         }
       } else {
         alert('Error parsing tune file. Please ensure it is a valid JSON tune file.');
@@ -700,9 +767,9 @@ async function processFile(content, filePath) {
     // Update analyzers with data processor
     const knockDetector = tabManager.getTabAnalyzer('knock');
     const boostAnalyzer = tabManager.getTabAnalyzer('boost');
-    const afrAnalyzer = tabManager.getTabAnalyzer('afr');
+    const afrAnalyzer = tabManager.getTabAnalyzer('fueling');
     const fuelTrimAnalyzer = tabManager.getTabAnalyzer('fueltrim');
-    const longTermFuelTrimAnalyzer = tabManager.getTabAnalyzer('longtermfueltrim');
+    const longTermFuelTrimAnalyzer = tabManager.longTermFuelTrimAnalyzer;
     const iamAnalyzer = tabManager.getTabAnalyzer('iam');
     const loadLimitAnalyzer = tabManager.getTabAnalyzer('loadlimit');
     const coolantTemperatureAnalyzer = tabManager.getTabAnalyzer('coolanttemp');
@@ -794,7 +861,7 @@ async function processFile(content, filePath) {
           hasColumns: !!afrAnalysis.columns,
           error: afrAnalysis.error
         });
-        tabManager.cache.set('afr', afrAnalysis);
+        tabManager.cache.set('fueling', afrAnalysis);
       } else {
         console.error('AFR analysis returned null');
       }
@@ -929,7 +996,9 @@ async function processFile(content, filePath) {
     updateProgress(75, 'Updating interface...');
     await new Promise(resolve => setTimeout(resolve, 10));
     
-    fileName.textContent = filePath.split(/[\\/]/).pop();
+    const fileNameOnly = filePath.split(/[\\/]/).pop();
+    fileName.textContent = fileNameOnly;
+    fileName.title = filePath; // Tooltip with full path
     if (dropZone) {
       dropZone.style.display = 'none';
     }
