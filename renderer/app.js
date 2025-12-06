@@ -589,19 +589,25 @@ async function handleOpenTuneFile() {
 function handleDragOver(e) {
   e.preventDefault();
   e.stopPropagation();
-  dropZone.classList.add('drag-over');
+  if (dropZone) {
+    dropZone.classList.add('drag-over');
+  }
 }
 
 function handleDragLeave(e) {
   e.preventDefault();
   e.stopPropagation();
-  dropZone.classList.remove('drag-over');
+  if (dropZone) {
+    dropZone.classList.remove('drag-over');
+  }
 }
 
 async function handleDrop(e) {
   e.preventDefault();
   e.stopPropagation();
-  dropZone.classList.remove('drag-over');
+  if (dropZone) {
+    dropZone.classList.remove('drag-over');
+  }
   
   // Check if tune file is loaded
   if (!window.tuneFileParser || !window.tuneFileParser.isLoaded()) {
@@ -924,7 +930,9 @@ async function processFile(content, filePath) {
     await new Promise(resolve => setTimeout(resolve, 10));
     
     fileName.textContent = filePath.split(/[\\/]/).pop();
-    dropZone.style.display = 'none';
+    if (dropZone) {
+      dropZone.style.display = 'none';
+    }
     
     // Enable data smoothing by default when log file is loaded
     window.smoothingConfig.enabled = true;

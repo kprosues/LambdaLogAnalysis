@@ -55,11 +55,6 @@
       </div>
     </div>
 
-    <div id="dropZone" class="drop-zone">
-      <p>Drag and drop a CSV log file here</p>
-      <p class="drop-hint">or click "Open Log File" above</p>
-    </div>
-
     <div id="contentArea" class="content-area" style="display: none;">
       <!-- Content Loading Overlay -->
       <div id="contentLoadingOverlay" class="content-loading-overlay" style="display: none;">
@@ -457,7 +452,7 @@
           <form id="autotune-form" class="form-grid">
             <div class="form-field">
               <label for="autotune-minSamples">Min Samples per Cell</label>
-              <input type="number" id="autotune-minSamples" min="1" value="5">
+              <input type="number" id="autotune-minSamples" min="1" value="150">
             </div>
             <div class="form-field">
               <label for="autotune-changeLimit">Change Limit (%)</label>
@@ -476,7 +471,7 @@
             </div>
             <div class="form-field">
               <label for="autotune-outputName">Output Tune File Name</label>
-              <input type="text" id="autotune-outputName" placeholder="autotuned_tune.tune">
+              <input type="text" id="autotune-outputName" value="Keith Proseus_1999JDMSTI_DW740_VF28_21builtStroker_v">
             </div>
             <div class="form-actions">
               <button id="autotune-runBtn" class="btn btn-primary">Run Autotune Analysis</button>
@@ -1103,7 +1098,7 @@
   <script src="tabs/intakeAirTemperatureTab.js"></script>
   <script src="autotuneEngine.js"></script>
   <script src="tabs/autotuneTab.js"></script>
-  <script src="tooltipConfig.js"></script>
+  <script src="../resources/tooltipConfig.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

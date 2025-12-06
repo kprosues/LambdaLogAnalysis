@@ -2,7 +2,7 @@
 const AutotuneTab = {
   elements: {
     form: null,
-    minSamples: null,
+    minu: null,
     changeLimit: null,
     outputName: null,
     baseTuneFile: null,
@@ -137,7 +137,7 @@ const AutotuneTab = {
       return;
     }
 
-    const minSamples = parseInt(this.elements.minSamples?.value || '5', 10) || 5;
+    const minSamples = parseInt(this.elements.minSamples?.value || '150', 10) || 150;
     const changeLimit = parseFloat(this.elements.changeLimit?.value || '5') || 5;
 
     this.setMessage('Running autotune analysis...', 'info');
@@ -315,7 +315,7 @@ const AutotuneTab = {
   getOutputFileName() {
     const value = (this.elements.outputName?.value || '').trim();
     if (!value) {
-      return 'autotuned_tune.tune';
+      return 'Keith Proseus_1999JDMSTI_DW740_VF28_21builtStroker_v';
     }
     const lowerValue = value.toLowerCase();
     if (lowerValue.endsWith('.tune') || lowerValue.endsWith('.json')) {
@@ -326,7 +326,7 @@ const AutotuneTab = {
 
   addTimestampToFileName(fileName) {
     if (!fileName) {
-      return 'autotuned_tune.tune';
+      return 'Keith Proseus_1999JDMSTI_DW740_VF28_21builtStroker_.tune';
     }
 
     // Generate timestamp: YYYYMMDD_HHMMSS
