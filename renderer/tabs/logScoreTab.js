@@ -127,7 +127,7 @@ const LogScoreTab = {
     }
 
     // 3. Get Air/Fuel Ratio events
-    const afrData = tabManager ? tabManager.getCachedAnalysis('afr') : null;
+    const afrData = tabManager ? tabManager.getCachedAnalysis('fueling') : null;
     const AFR_CONVERSION_FACTOR = 14.7; // 1 lambda = 14.7 AFR
     
     if (afrData && afrData.events && Array.isArray(afrData.events)) {

@@ -43,13 +43,6 @@ const AFRAnalysisTab = {
     document.querySelectorAll('#afr-afrTable th[data-sort]').forEach(th => {
       th.addEventListener('click', () => this.handleSort(th.dataset.sort));
     });
-    if (modal) {
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          modal.style.display = 'none';
-        }
-      });
-    }
   },
 
   render(analysisData) {
@@ -82,7 +75,7 @@ const AFRAnalysisTab = {
   showColumnInfo() {
     // Get available columns from data processor
     let dataProcessor = null;
-    const analyzer = tabManager ? tabManager.getTabAnalyzer('afr') : null;
+    const analyzer = tabManager ? tabManager.getTabAnalyzer('fueling') : null;
     
     if (analyzer && analyzer.dataProcessor) {
       dataProcessor = analyzer.dataProcessor;
@@ -106,7 +99,7 @@ const AFRAnalysisTab = {
     }
     
     // Display this info in the UI as well
-    const statsPanel = document.querySelector('.tab-content[data-tab="afr"] .statistics-panel');
+    const statsPanel = document.querySelector('.tab-content[data-tab="fueling"] .statistics-panel');
     if (statsPanel) {
       let infoDiv = document.getElementById('afr-column-info');
       if (!infoDiv) {
@@ -138,7 +131,7 @@ const AFRAnalysisTab = {
   },
 
   updateStatistics() {
-    const analyzer = tabManager.getTabAnalyzer('afr');
+    const analyzer = tabManager.getTabAnalyzer('fueling');
     if (!analyzer) {
       console.warn('AFR analyzer not found');
       return;
@@ -171,7 +164,7 @@ const AFRAnalysisTab = {
   },
 
   renderCharts(preserveZoom = false) {
-    const analyzer = tabManager.getTabAnalyzer('afr');
+    const analyzer = tabManager.getTabAnalyzer('fueling');
     if (!analyzer) {
       console.warn('AFR analyzer not found for charts');
       return;
@@ -201,7 +194,7 @@ const AFRAnalysisTab = {
     
     const data = dataProcessor.getData();
 
-    const analysisData = tabManager.getCachedAnalysis('afr');
+    const analysisData = tabManager.getCachedAnalysis('fueling');
     if (!analysisData) {
       console.warn('No cached AFR analysis data');
       return;
@@ -671,10 +664,10 @@ const AFRAnalysisTab = {
   },
 
   updateTable() {
-    const analyzer = tabManager.getTabAnalyzer('afr');
+    const analyzer = tabManager.getTabAnalyzer('fueling');
     if (!analyzer || !this.elements.afrTableBody) return;
     
-    const analysisData = tabManager.getCachedAnalysis('afr');
+    const analysisData = tabManager.getCachedAnalysis('fueling');
     if (!analysisData) return;
 
     const searchTerm = this.elements.searchInput ? this.elements.searchInput.value : '';

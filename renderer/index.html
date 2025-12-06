@@ -3,37 +3,43 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ECU Log Analysis Tool</title>
+  <title>ProjectLambda Log Analysis Tool</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="container">
     <header>
-      <img src="../assets/logo.png" alt="ECU Log Analysis Tool" class="app-logo">
-      <div class="file-controls">
-        <button id="openTuneFileBtn" class="btn btn-primary">Load Tune File</button>
-        <button id="openFileBtn" class="btn btn-secondary" disabled title="Please load a tune file first">Open Log File</button>
-        <button id="resetZoomBtn" class="btn btn-secondary" style="display: none;">Reset Zoom</button>
-        <button id="openTooltipSettingsBtn" class="btn btn-secondary" title="Configure tooltip fields">Tooltip Settings</button>
-        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 15px;">
-          <input type="checkbox" id="global-smoothDataToggle" style="cursor: pointer;" checked>
-          <span style="font-size: 14px; color: #333;">Enable Data Smoothing</span>
-        </label>
-        <span id="fileName" class="file-name">No file loaded</span>
-        <span id="tuneFileName" class="file-name" style="margin-left: 10px; display: none;">No tune file loaded</span>
+      <div class="header-left">
+        <h1>ProjectLambda Log Analysis Tool</h1>
+        <img src="../assets/logo.png" alt="ProjectLambda Log Analysis Tool" class="app-logo">
+      </div>
+      <div class="header-right">
+        <div class="file-controls">
+          <button id="openTuneFileBtn" class="btn btn-primary">Load Tune File</button>
+          <button id="openFileBtn" class="btn btn-secondary" disabled title="Please load a tune file first">Open Log File</button>
+          <button id="resetZoomBtn" class="btn btn-secondary" style="display: none;">Reset Zoom</button>
+          <button id="openTooltipSettingsBtn" class="btn btn-secondary" title="Configure tooltip fields">Tooltip Settings</button>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 15px;">
+            <input type="checkbox" id="global-smoothDataToggle" style="cursor: pointer;" checked>
+            <span style="font-size: 14px; color: #333;">Enable Data Smoothing</span>
+          </label>
+        </div>
+        <div class="file-names">
+          <span id="tuneFileName" class="file-name" style="display: none;">No tune file loaded</span>
+          <span id="fileName" class="file-name">No file loaded</span>
+        </div>
+        <!-- Progress Bar Section -->
+        <div id="progressSection" class="progress-section" style="display: none;">
+          <div class="progress-info">
+            <p id="loadingText" class="progress-text">Processing...</p>
+            <p id="loadingStatus" class="progress-percent">0%</p>
+          </div>
+          <div class="progress-bar-container">
+            <div id="progressBar" class="progress-bar"></div>
+          </div>
+        </div>
       </div>
     </header>
-
-    <!-- Progress Bar Section -->
-    <div id="progressSection" class="progress-section" style="display: none;">
-      <div class="progress-info">
-        <p id="loadingText" class="progress-text">Processing...</p>
-        <p id="loadingStatus" class="progress-percent">0%</p>
-      </div>
-      <div class="progress-bar-container">
-        <div id="progressBar" class="progress-bar"></div>
-      </div>
-    </div>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal" style="display: none;">
@@ -64,10 +70,8 @@
         <button class="tab-btn active" data-tab="logscore">Log Score</button>
         <button class="tab-btn" data-tab="knock">Knock Analysis</button>
         <button class="tab-btn" data-tab="boost">Boost Control</button>
-        <button class="tab-btn" data-tab="afr">Air/Fuel Ratio</button>
-        <button class="tab-btn" data-tab="autotune">Autotune</button>
-        <button class="tab-btn" data-tab="fueltrim">Short Term Fuel Trim</button>
-        <button class="tab-btn" data-tab="longtermfueltrim">Long Term Fuel Trim</button>
+        <button class="tab-btn" data-tab="fueling">Fueling</button>
+        <button class="tab-btn" data-tab="fueltrim">Fuel Trim</button>
         <button class="tab-btn" data-tab="iam">IAM Analysis</button>
         <button class="tab-btn" data-tab="loadlimit">Load Limit</button>
         <button class="tab-btn" data-tab="coolanttemp">Coolant Temperature</button>
@@ -116,8 +120,7 @@
               <option value="knock">Knock Analysis</option>
               <option value="boost">Boost Control</option>
               <option value="afr">Air/Fuel Ratio</option>
-              <option value="fueltrim">Short Term Fuel Trim</option>
-              <option value="longtermfueltrim">Long Term Fuel Trim</option>
+              <option value="fueltrim">Fuel Trim</option>
               <option value="iam">IAM Analysis</option>
               <option value="loadlimit">Load Limit</option>
               <option value="coolanttemp">Coolant Temperature</option>
@@ -228,33 +231,59 @@
           </div>
         </section>
 
+        <!-- Spark Table Coverage Heatmap -->
+        <section class="anomaly-section">
+          <h2>Base Spark Table Coverage (MT)</h2>
+          <p class="fuel-change-description">Data point coverage mapped to the base_spark_mt table axes (RPM x Load). Shows where log data falls within the tune file's spark timing table. Darker colors indicate more data points. Cells with knock events are highlighted in bright red.</p>
+          <div class="heatmap-legend">
+            <span class="legend-label">Data Points:</span>
+            <div class="legend-gradient">
+              <span class="legend-min">0</span>
+              <div class="gradient-bar"></div>
+              <span class="legend-max" id="knock-heatmap-max-label">Max</span>
+            </div>
+            <div style="margin-left: 20px; display: flex; align-items: center; gap: 8px;">
+              <span class="legend-swatch" style="background-color: #ff0000; border: 1px solid #cc0000;"></span>
+              <span>Knock Events</span>
+            </div>
+          </div>
+          <div class="heatmap-container" id="knock-heatmap">
+            <p class="empty-state">Load a tune file and log data to see spark table coverage.</p>
+          </div>
+        </section>
+
         <!-- Anomaly Table -->
         <section class="anomaly-section">
-          <h2>Knock Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="knock-searchInput" placeholder="Search..." class="search-input">
-            <select id="knock-severityFilter" class="filter-select">
-              <option value="all">All Severities</option>
-              <option value="mild">Mild</option>
-              <option value="severe">Severe</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="knock-anomalyTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="knockRetard">Knock Retard (°) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="afr">A/F Ratio (λ) ↕</th>
-                  <th data-sort="severity">Severity ↕</th>
-                </tr>
-              </thead>
-              <tbody id="knock-anomalyTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="knock-events-detail">
+            <span>Knock Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="knock-events-detail">
+            <div class="table-controls">
+              <input type="text" id="knock-searchInput" placeholder="Search..." class="search-input">
+              <select id="knock-severityFilter" class="filter-select">
+                <option value="all">All Severities</option>
+                <option value="mild">Mild</option>
+                <option value="severe">Severe</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="knock-anomalyTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="knockRetard">Knock Retard (°) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="afr">A/F Ratio (λ) ↕</th>
+                    <th data-sort="severity">Severity ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="knock-anomalyTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
@@ -324,40 +353,62 @@
           </div>
         </section>
 
+        <!-- Boost Target Coverage Heatmap -->
+        <section class="anomaly-section">
+          <h2>Boost Target Table Coverage</h2>
+          <p class="fuel-change-description">Data point coverage mapped to the boost target table axes (RPM x TPS). Shows where log data falls within the tune file's boost target table. Darker colors indicate more data points.</p>
+          <div class="heatmap-legend">
+            <span class="legend-label">Data Points:</span>
+            <div class="legend-gradient">
+              <span class="legend-min">0</span>
+              <div class="gradient-bar"></div>
+              <span class="legend-max" id="boost-heatmap-max-label">Max</span>
+            </div>
+          </div>
+          <div class="heatmap-container" id="boost-heatmap">
+            <p class="empty-state">Load a tune file and log data to see boost target table coverage.</p>
+          </div>
+        </section>
+
         <!-- Boost Events Table -->
         <section class="anomaly-section">
-          <h2>Boost Control Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="boost-searchInput" placeholder="Search..." class="search-input">
-            <select id="boost-eventTypeFilter" class="filter-select">
-              <option value="all">All Event Types</option>
-              <option value="overshoot">Overshoot</option>
-              <option value="undershoot">Undershoot</option>
-              <option value="normal">Normal</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="boost-boostTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="boostTarget">Boost Target (PSI) ↕</th>
-                  <th data-sort="actualBoost">Actual Boost (PSI) ↕</th>
-                  <th data-sort="boostError">Error (PSI) ↕</th>
-                  <th data-sort="boostErrorPercent">Error (%) ↕</th>
-                  <th data-sort="wastegateDC">Wastegate DC (%) ↕</th>
-                  <th data-sort="eventType">Event Type ↕</th>
-                </tr>
-              </thead>
-              <tbody id="boost-boostTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="boost-events-detail">
+            <span>Boost Control Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="boost-events-detail">
+            <div class="table-controls">
+              <input type="text" id="boost-searchInput" placeholder="Search..." class="search-input">
+              <select id="boost-eventTypeFilter" class="filter-select">
+                <option value="all">All Event Types</option>
+                <option value="overshoot">Overshoot</option>
+                <option value="undershoot">Undershoot</option>
+                <option value="normal">Normal</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="boost-boostTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="boostTarget">Boost Target (PSI) ↕</th>
+                    <th data-sort="actualBoost">Actual Boost (PSI) ↕</th>
+                    <th data-sort="boostError">Error (PSI) ↕</th>
+                    <th data-sort="boostErrorPercent">Error (%) ↕</th>
+                    <th data-sort="wastegateDC">Wastegate DC (%) ↕</th>
+                    <th data-sort="eventType">Event Type ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="boost-boostTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
 
-      <!-- Air/Fuel Ratio Tab -->
-      <div class="tab-content" data-tab="afr">
+      <!-- Fueling Tab (Combined Air/Fuel Ratio + Autotune) -->
+      <div class="tab-content" data-tab="fueling">
         <!-- Tab Loading Overlay -->
         <div class="tab-loading-overlay" style="display: none;">
           <div class="loading-content">
@@ -365,7 +416,8 @@
             <p>Loading data...</p>
           </div>
         </div>
-        <!-- Statistics Panel -->
+
+        <!-- AFR Statistics Panel -->
         <section class="statistics-panel">
           <h2>Open Loop Fueling Accuracy (PE Mode)</h2>
           <div class="stats-grid">
@@ -388,9 +440,9 @@
           </div>
         </section>
 
-        <!-- Charts Section -->
+        <!-- AFR Charts Section -->
         <section class="charts-section">
-          <h2>Analysis Charts</h2>
+          <h2>Air/Fuel Ratio Analysis</h2>
           <div class="charts-container">
             <div class="chart-wrapper">
               <div class="chart-header">
@@ -409,45 +461,42 @@
 
         <!-- AFR Events Table -->
         <section class="anomaly-section">
-          <h2>Open Loop Fueling Events (PE Mode)</h2>
-          <div class="table-controls">
-            <input type="text" id="afr-searchInput" placeholder="Search..." class="search-input">
-            <select id="afr-eventTypeFilter" class="filter-select">
-              <option value="all">All Event Types</option>
-              <option value="lean">Lean</option>
-              <option value="rich">Rich</option>
-              <option value="normal">Normal</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="afr-afrTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="duration">Duration ↕</th>
-                  <th data-sort="targetAFR">Target AFR (λ) ↕</th>
-                  <th data-sort="measuredAFR">Measured AFR (λ) ↕</th>
-                  <th data-sort="afrError">Error (λ) ↕</th>
-                  <th data-sort="afrErrorPercent">Error (%) ↕</th>
-                  <th data-sort="eventType">Event Type ↕</th>
-                </tr>
-              </thead>
-              <tbody id="afr-afrTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="afr-events-detail">
+            <span>Open Loop Fueling Events (PE Mode)</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="afr-events-detail">
+            <div class="table-controls">
+              <input type="text" id="afr-searchInput" placeholder="Search..." class="search-input">
+              <select id="afr-eventTypeFilter" class="filter-select">
+                <option value="all">All Event Types</option>
+                <option value="lean">Lean</option>
+                <option value="rich">Rich</option>
+                <option value="normal">Normal</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="afr-afrTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="duration">Duration ↕</th>
+                    <th data-sort="targetAFR">Target AFR (λ) ↕</th>
+                    <th data-sort="measuredAFR">Measured AFR (λ) ↕</th>
+                    <th data-sort="afrError">Error (λ) ↕</th>
+                    <th data-sort="afrErrorPercent">Error (%) ↕</th>
+                    <th data-sort="eventType">Event Type ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="afr-afrTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
-      </div>
 
-      <!-- Autotune Tab -->
-      <div class="tab-content" data-tab="autotune">
-        <div class="tab-loading-overlay" style="display: none;">
-          <div class="loading-content">
-            <div class="spinner"></div>
-            <p>Preparing autotune tools...</p>
-          </div>
-        </div>
-        <section class="statistics-panel">
+        <!-- Autotune Section -->
+        <section class="statistics-panel" style="margin-top: 40px; border-top: 2px solid #e0e0e0; padding-top: 30px;">
           <h2>Autotune Fuel Base Adjustments</h2>
           <form id="autotune-form" class="form-grid">
             <div class="form-field">
@@ -482,6 +531,7 @@
             Load a tune and datalog, then run the analysis to generate recommendations.
           </div>
         </section>
+
         <!-- Fuel Base Coverage Heatmap -->
         <section class="anomaly-section">
           <h2>Fuel Base Table Coverage Heatmap</h2>
@@ -552,7 +602,7 @@
         </section>
       </div>
 
-      <!-- Short Term Fuel Trim Tab -->
+      <!-- Fuel Trim Tab (Combined Short Term + Long Term) -->
       <div class="tab-content" data-tab="fueltrim">
         <!-- Tab Loading Overlay -->
         <div class="tab-loading-overlay" style="display: none;">
@@ -561,9 +611,10 @@
             <p>Loading data...</p>
           </div>
         </div>
-        <!-- Statistics Panel -->
+
+        <!-- Short Term Fuel Trim Section -->
         <section class="statistics-panel">
-          <h2>Summary Statistics</h2>
+          <h2>Short Term Fuel Trim - Summary Statistics</h2>
           <div class="stats-grid">
             <div class="stat-card">
               <div class="stat-label">Average Trim</div>
@@ -584,10 +635,10 @@
           </div>
         </section>
 
-        <!-- Charts Section -->
+        <!-- Short Term Charts Section -->
         <section class="charts-section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-            <h2>Analysis Charts</h2>
+            <h2>Short Term Fuel Trim Analysis</h2>
             <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="fueltrim-showThrottleToggle" style="cursor: pointer;" checked>
@@ -605,49 +656,44 @@
           </div>
         </section>
 
-        <!-- Fuel Trim Events Table -->
+        <!-- Short Term Fuel Trim Events Table -->
         <section class="anomaly-section">
-          <h2>Fuel Trim Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="fueltrim-searchInput" placeholder="Search..." class="search-input">
-            <select id="fueltrim-eventTypeFilter" class="filter-select">
-              <option value="all">All Event Types</option>
-              <option value="positive">Positive (>+10%)</option>
-              <option value="negative">Negative (<-10%)</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="fueltrim-fuelTrimTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="shortTermTrim">Fuel Trim (%) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="afr">A/F Ratio (λ) ↕</th>
-                  <th data-sort="eventType">Event Type ↕</th>
-                </tr>
-              </thead>
-              <tbody id="fueltrim-fuelTrimTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="fueltrim-events-detail">
+            <span>Short Term Fuel Trim Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="fueltrim-events-detail">
+            <div class="table-controls">
+              <input type="text" id="fueltrim-searchInput" placeholder="Search..." class="search-input">
+              <select id="fueltrim-eventTypeFilter" class="filter-select">
+                <option value="all">All Event Types</option>
+                <option value="positive">Positive (>+10%)</option>
+                <option value="negative">Negative (<-10%)</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="fueltrim-fuelTrimTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="shortTermTrim">Fuel Trim (%) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="afr">A/F Ratio (λ) ↕</th>
+                    <th data-sort="eventType">Event Type ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="fueltrim-fuelTrimTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
-      </div>
 
-      <!-- Long Term Fuel Trim Tab -->
-      <div class="tab-content" data-tab="longtermfueltrim">
-        <!-- Tab Loading Overlay -->
-        <div class="tab-loading-overlay" style="display: none;">
-          <div class="loading-content">
-            <div class="spinner"></div>
-            <p>Loading data...</p>
-          </div>
-        </div>
-        <!-- Statistics Panel -->
-        <section class="statistics-panel">
-          <h2>Summary Statistics</h2>
+        <!-- Long Term Fuel Trim Section -->
+        <section class="statistics-panel" style="margin-top: 40px; border-top: 2px solid #e0e0e0; padding-top: 30px;">
+          <h2>Long Term Fuel Trim - Summary Statistics</h2>
           <div class="stats-grid">
             <div class="stat-card">
               <div class="stat-label">Average Trim</div>
@@ -668,10 +714,10 @@
           </div>
         </section>
 
-        <!-- Charts Section -->
+        <!-- Long Term Charts Section -->
         <section class="charts-section">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-            <h2>Analysis Charts</h2>
+            <h2>Long Term Fuel Trim Analysis</h2>
             <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="longtermfueltrim-showThrottleToggle" style="cursor: pointer;" checked>
@@ -689,33 +735,38 @@
           </div>
         </section>
 
-        <!-- Fuel Trim Events Table -->
+        <!-- Long Term Fuel Trim Events Table -->
         <section class="anomaly-section">
-          <h2>Fuel Trim Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="longtermfueltrim-searchInput" placeholder="Search..." class="search-input">
-            <select id="longtermfueltrim-eventTypeFilter" class="filter-select">
-              <option value="all">All Event Types</option>
-              <option value="positive">Positive (>+5%)</option>
-              <option value="negative">Negative (<-5%)</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="longtermfueltrim-fuelTrimTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="longTermTrim">Fuel Trim (%) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="afr">A/F Ratio (λ) ↕</th>
-                  <th data-sort="eventType">Event Type ↕</th>
-                </tr>
-              </thead>
-              <tbody id="longtermfueltrim-fuelTrimTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="longtermfueltrim-events-detail">
+            <span>Long Term Fuel Trim Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="longtermfueltrim-events-detail">
+            <div class="table-controls">
+              <input type="text" id="longtermfueltrim-searchInput" placeholder="Search..." class="search-input">
+              <select id="longtermfueltrim-eventTypeFilter" class="filter-select">
+                <option value="all">All Event Types</option>
+                <option value="positive">Positive (>+5%)</option>
+                <option value="negative">Negative (<-5%)</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="longtermfueltrim-fuelTrimTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="longTermTrim">Fuel Trim (%) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="afr">A/F Ratio (λ) ↕</th>
+                    <th data-sort="eventType">Event Type ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="longtermfueltrim-fuelTrimTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
@@ -771,33 +822,38 @@
 
         <!-- IAM Events Table -->
         <section class="anomaly-section">
-          <h2>IAM Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="iam-searchInput" placeholder="Search..." class="search-input">
-            <select id="iam-severityFilter" class="filter-select">
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="severe">Severe</option>
-              <option value="moderate">Moderate</option>
-              <option value="mild">Mild</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="iam-iamTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="iam">IAM (%) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="knockRetard">Knock Retard (°) ↕</th>
-                  <th data-sort="severity">Severity ↕</th>
-                </tr>
-              </thead>
-              <tbody id="iam-iamTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="iam-events-detail">
+            <span>IAM Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="iam-events-detail">
+            <div class="table-controls">
+              <input type="text" id="iam-searchInput" placeholder="Search..." class="search-input">
+              <select id="iam-severityFilter" class="filter-select">
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="severe">Severe</option>
+                <option value="moderate">Moderate</option>
+                <option value="mild">Mild</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="iam-iamTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="iam">IAM (%) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="knockRetard">Knock Retard (°) ↕</th>
+                    <th data-sort="severity">Severity ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="iam-iamTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
@@ -845,32 +901,37 @@
 
         <!-- Load Limit Events Table -->
         <section class="anomaly-section">
-          <h2>Load Limit Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="loadlimit-searchInput" placeholder="Search..." class="search-input">
-            <select id="loadlimit-eventTypeFilter" class="filter-select">
-              <option value="all">All Event Types</option>
-              <option value="limit_violation">Limit Violations</option>
-              <option value="near_limit">Near Limit</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="loadlimit-loadTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="loadLimit">Limit (g/rev) ↕</th>
-                  <th data-sort="loadRatio">Ratio (%) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="severity">Severity ↕</th>
-                  <th data-sort="fuelCut">Fuel Cut ↕</th>
-                </tr>
-              </thead>
-              <tbody id="loadlimit-loadTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="loadlimit-events-detail">
+            <span>Load Limit Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="loadlimit-events-detail">
+            <div class="table-controls">
+              <input type="text" id="loadlimit-searchInput" placeholder="Search..." class="search-input">
+              <select id="loadlimit-eventTypeFilter" class="filter-select">
+                <option value="all">All Event Types</option>
+                <option value="limit_violation">Limit Violations</option>
+                <option value="near_limit">Near Limit</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="loadlimit-loadTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="loadLimit">Limit (g/rev) ↕</th>
+                    <th data-sort="loadRatio">Ratio (%) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="severity">Severity ↕</th>
+                    <th data-sort="fuelCut">Fuel Cut ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="loadlimit-loadTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
@@ -926,33 +987,38 @@
 
         <!-- Coolant Temperature Events Table -->
         <section class="anomaly-section">
-          <h2>Coolant Temperature Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="coolanttemp-searchInput" placeholder="Search..." class="search-input">
-            <select id="coolanttemp-severityFilter" class="filter-select">
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="severe">Severe</option>
-              <option value="moderate">Moderate</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="coolanttemp-coolantTempTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="coolantTemp">Temperature (°C) ↕</th>
-                  <th data-sort="maxTemp">Max Temp (°C) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="severity">Severity ↕</th>
-                  <th data-sort="fanStatus">Fan Status ↕</th>
-                </tr>
-              </thead>
-              <tbody id="coolanttemp-coolantTempTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="coolanttemp-events-detail">
+            <span>Coolant Temperature Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="coolanttemp-events-detail">
+            <div class="table-controls">
+              <input type="text" id="coolanttemp-searchInput" placeholder="Search..." class="search-input">
+              <select id="coolanttemp-severityFilter" class="filter-select">
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="severe">Severe</option>
+                <option value="moderate">Moderate</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="coolanttemp-coolantTempTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="coolantTemp">Temperature (°C) ↕</th>
+                    <th data-sort="maxTemp">Max Temp (°C) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="severity">Severity ↕</th>
+                    <th data-sort="fanStatus">Fan Status ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="coolanttemp-coolantTempTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
@@ -1008,40 +1074,45 @@
 
         <!-- Intake Air Temperature Events Table -->
         <section class="anomaly-section">
-          <h2>Intake Air Temperature Events Detail</h2>
-          <div class="table-controls">
-            <input type="text" id="iat-searchInput" placeholder="Search..." class="search-input">
-            <select id="iat-severityFilter" class="filter-select">
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="severe">Severe</option>
-              <option value="moderate">Moderate</option>
-              <option value="mild">Mild</option>
-            </select>
-            <select id="iat-eventTypeFilter" class="filter-select">
-              <option value="all">All Types</option>
-              <option value="high_temp">High Temperature</option>
-              <option value="low_temp">Low Temperature</option>
-            </select>
-          </div>
-          <div class="table-container">
-            <table id="iat-iatTable" class="anomaly-table">
-              <thead>
-                <tr>
-                  <th data-sort="time">Time (s) ↕</th>
-                  <th data-sort="iat">IAT (°C) ↕</th>
-                  <th data-sort="maxIAT">Max IAT (°C) ↕</th>
-                  <th data-sort="rpm">RPM ↕</th>
-                  <th data-sort="throttle">Throttle (%) ↕</th>
-                  <th data-sort="load">Load (g/rev) ↕</th>
-                  <th data-sort="boost">Boost (kPa) ↕</th>
-                  <th data-sort="severity">Severity ↕</th>
-                  <th data-sort="thresholdStatus">Threshold ↕</th>
-                </tr>
-              </thead>
-              <tbody id="iat-iatTableBody">
-              </tbody>
-            </table>
+          <h2 class="collapsible-header" data-target="iat-events-detail">
+            <span>Intake Air Temperature Events Detail</span>
+            <span class="collapse-icon">▼</span>
+          </h2>
+          <div class="collapsible-content collapsed" id="iat-events-detail">
+            <div class="table-controls">
+              <input type="text" id="iat-searchInput" placeholder="Search..." class="search-input">
+              <select id="iat-severityFilter" class="filter-select">
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="severe">Severe</option>
+                <option value="moderate">Moderate</option>
+                <option value="mild">Mild</option>
+              </select>
+              <select id="iat-eventTypeFilter" class="filter-select">
+                <option value="all">All Types</option>
+                <option value="high_temp">High Temperature</option>
+                <option value="low_temp">Low Temperature</option>
+              </select>
+            </div>
+            <div class="table-container">
+              <table id="iat-iatTable" class="anomaly-table">
+                <thead>
+                  <tr>
+                    <th data-sort="time">Time (s) ↕</th>
+                    <th data-sort="iat">IAT (°C) ↕</th>
+                    <th data-sort="maxIAT">Max IAT (°C) ↕</th>
+                    <th data-sort="rpm">RPM ↕</th>
+                    <th data-sort="throttle">Throttle (%) ↕</th>
+                    <th data-sort="load">Load (g/rev) ↕</th>
+                    <th data-sort="boost">Boost (kPa) ↕</th>
+                    <th data-sort="severity">Severity ↕</th>
+                    <th data-sort="thresholdStatus">Threshold ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="iat-iatTableBody">
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
@@ -1148,14 +1219,20 @@
   <script src="tabs/afrAnalysisTab.js"></script>
   <script src="tabs/fuelTrimTab.js"></script>
   <script src="tabs/longTermFuelTrimTab.js"></script>
+  <script src="tabs/combinedFuelTrimTab.js"></script>
   <script src="tabs/iamAnalysisTab.js"></script>
   <script src="tabs/loadLimitTab.js"></script>
   <script src="tabs/coolantTemperatureTab.js"></script>
   <script src="tabs/intakeAirTemperatureTab.js"></script>
   <script src="autotuneEngine.js"></script>
   <script src="tabs/autotuneTab.js"></script>
+  <script src="tabs/fuelingTab.js"></script>
   <script src="../resources/tooltipConfig.js"></script>
   <script src="app.js"></script>
+  
+  <footer id="app-footer">
+    <span>ProjectLambda Log Analysis Tool v<span id="app-version">-</span></span>
+  </footer>
 </body>
 </html>
 

@@ -15,7 +15,10 @@ const BoostControlTab = {
     eventTypeFilter: null,
     boostTargetChart: null,
     boostErrorChart: null,
-    wastegateChart: null
+    wastegateChart: null,
+    // Heatmap elements
+    heatmap: null,
+    heatmapMaxLabel: null
   },
 
   charts: {},
@@ -33,6 +36,9 @@ const BoostControlTab = {
     this.elements.boostTableBody = document.getElementById('boost-boostTableBody');
     this.elements.searchInput = document.getElementById('boost-searchInput');
     this.elements.eventTypeFilter = document.getElementById('boost-eventTypeFilter');
+    // Heatmap elements
+    this.elements.heatmap = document.getElementById('boost-heatmap');
+    this.elements.heatmapMaxLabel = document.getElementById('boost-heatmap-max-label');
 
     // Set up event listeners
     if (this.elements.searchInput) {
@@ -101,6 +107,7 @@ const BoostControlTab = {
       // Still try to update with empty/default values
       this.updateStatistics();
       this.updateTable();
+      this.renderHeatmap();
       return;
     }
     
@@ -122,6 +129,7 @@ const BoostControlTab = {
     }
     
     this.updateTable();
+    this.renderHeatmap();
   },
   
   showColumnInfo() {
@@ -987,6 +995,258 @@ const BoostControlTab = {
     });
     
     this.updateTable();
+  },
+
+  /**
+   * Render the boost target coverage heatmap
+   * Shows data points binned by the tune file's boost target table axes (RPM x TPS)
+   */
+  renderHeatmap() {
+    const container = this.elements.heatmap;
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    // Check if tune file is loaded
+    if (!window.tuneFileParser || !window.tuneFileParser.isLoaded()) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Load a tune file to see boost target table coverage.';
+      container.appendChild(empty);
+      return;
+    }
+
+    // Check if data processor is available
+    if (!window.dataProcessor) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Load log data to see boost target table coverage.';
+      container.appendChild(empty);
+      return;
+    }
+
+    const data = window.dataProcessor.getData();
+    if (!data || data.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'No log data available. Load a log file to see boost target table coverage.';
+      container.appendChild(empty);
+      return;
+    }
+
+    // Get boost target table axes from tune file
+    const rpmAxis = window.tuneFileParser.getArray('boost_target_rpm_index');
+    const tpsAxis = window.tuneFileParser.getArray('boost_target_tps_index');
+
+    if (!rpmAxis || !tpsAxis || rpmAxis.length === 0 || tpsAxis.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Tune file is missing boost target table axes.';
+      container.appendChild(empty);
+      return;
+    }
+
+    // Compute hit counts - bin data by RPM and TPS
+    const hitCounts = this.computeHeatmapHitCounts(data, rpmAxis, tpsAxis);
+    if (!hitCounts) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Unable to compute heatmap data. Check log file has RPM and Throttle Position columns.';
+      container.appendChild(empty);
+      return;
+    }
+
+    // Find max hit count for scaling
+    let maxHits = 0;
+    let totalHits = 0;
+    let cellsWithData = 0;
+    hitCounts.forEach(row => {
+      row.forEach(count => {
+        if (count > maxHits) maxHits = count;
+        totalHits += count;
+        if (count > 0) cellsWithData++;
+      });
+    });
+
+    // Update the legend max label
+    if (this.elements.heatmapMaxLabel) {
+      this.elements.heatmapMaxLabel.textContent = maxHits.toLocaleString();
+    }
+
+    // Create the heatmap table
+    const table = document.createElement('table');
+    table.className = 'heatmap-table';
+
+    // Create header row with TPS axis values
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    
+    // Corner cell (RPM \ TPS label)
+    const cornerTh = document.createElement('th');
+    cornerTh.className = 'corner-header';
+    cornerTh.textContent = 'RPM \\ TPS';
+    cornerTh.title = 'Rows: RPM (rpm), Columns: Throttle Position (%)';
+    headerRow.appendChild(cornerTh);
+
+    // TPS axis headers (columns)
+    tpsAxis.forEach(tps => {
+      const th = document.createElement('th');
+      th.textContent = tps.toFixed(1) + '%';
+      th.title = `Throttle Position: ${tps.toFixed(2)}%`;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Create body with RPM rows
+    const tbody = document.createElement('tbody');
+    rpmAxis.forEach((rpm, rpmIdx) => {
+      const tr = document.createElement('tr');
+      
+      // Row header (RPM value)
+      const rowTh = document.createElement('th');
+      rowTh.className = 'row-header';
+      rowTh.textContent = rpm.toFixed(0);
+      rowTh.title = `RPM: ${rpm.toFixed(0)}`;
+      tr.appendChild(rowTh);
+
+      // Data cells
+      tpsAxis.forEach((tps, tpsIdx) => {
+        const td = document.createElement('td');
+        const hits = hitCounts[rpmIdx][tpsIdx];
+        td.textContent = hits > 0 ? hits.toLocaleString() : '';
+        td.title = `RPM: ${rpm.toFixed(0)}, TPS: ${tps.toFixed(2)}%\nData hits: ${hits.toLocaleString()}`;
+        
+        // Calculate color intensity (0-9 scale)
+        const colorClass = this.getHeatmapColorClass(hits, maxHits);
+        td.className = colorClass;
+        
+        tr.appendChild(td);
+      });
+      
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    // Add stats summary
+    const stats = document.createElement('div');
+    stats.className = 'heatmap-stats';
+    const totalCells = rpmAxis.length * tpsAxis.length;
+    const coveragePercent = ((cellsWithData / totalCells) * 100).toFixed(1);
+    stats.innerHTML = `
+      <span><strong>Total Data Points:</strong> ${totalHits.toLocaleString()}</span>
+      <span><strong>Cells with Data:</strong> ${cellsWithData} / ${totalCells} (${coveragePercent}%)</span>
+      <span><strong>Max Hits per Cell:</strong> ${maxHits.toLocaleString()}</span>
+    `;
+    container.appendChild(stats);
+  },
+
+  /**
+   * Compute hit counts for heatmap by binning data into RPM x TPS cells
+   * Only counts data points that are in boost (>= 100 kPa actual boost)
+   * @param {Array} data - Log data rows
+   * @param {Array} rpmAxis - RPM axis breakpoints from tune file
+   * @param {Array} tpsAxis - TPS axis breakpoints from tune file
+   * @returns {Array|null} - 2D array of hit counts [rpmIdx][tpsIdx] or null if error
+   */
+  computeHeatmapHitCounts(data, rpmAxis, tpsAxis) {
+    // Initialize hit count matrix
+    const hitCounts = Array.from({ length: rpmAxis.length }, () => 
+      Array.from({ length: tpsAxis.length }, () => 0)
+    );
+
+    // Get column names
+    const rpmColumn = 'Engine Speed (rpm)';
+    const tpsColumn = 'Throttle Position (%)';
+    const boostColumn = 'Manifold Absolute Pressure (kPa)';
+
+    // Check if required columns exist
+    const columns = window.dataProcessor.getColumns();
+    if (!columns.includes(rpmColumn) || !columns.includes(tpsColumn)) {
+      console.warn('Missing required columns for boost heatmap:', { rpmColumn, tpsColumn });
+      return null;
+    }
+
+    // Process each row
+    data.forEach(row => {
+      const rpm = parseFloat(row[rpmColumn]);
+      const tps = parseFloat(row[tpsColumn]);
+      const boost = parseFloat(row[boostColumn]);
+
+      // Skip invalid data
+      if (!isFinite(rpm) || !isFinite(tps)) {
+        return;
+      }
+
+      // Only count data points in boost (>= 100 kPa) if boost column exists
+      if (columns.includes(boostColumn) && isFinite(boost) && boost < 100) {
+        return;
+      }
+
+      // Find RPM index (bin to nearest lower breakpoint)
+      const rpmIdx = this.findAxisIndex(rpm, rpmAxis);
+      // Find TPS index (bin to nearest lower breakpoint)
+      const tpsIdx = this.findAxisIndex(tps, tpsAxis);
+
+      if (rpmIdx !== null && tpsIdx !== null) {
+        hitCounts[rpmIdx][tpsIdx] += 1;
+      }
+    });
+
+    return hitCounts;
+  },
+
+  /**
+   * Find the axis index for a value (bin to nearest lower breakpoint)
+   * Matches the Python axis_index implementation used in autotune
+   * @param {number} value - Value to find index for
+   * @param {Array} axis - Array of breakpoints
+   * @returns {number|null} - Index or null if invalid
+   */
+  findAxisIndex(value, axis) {
+    if (!Array.isArray(axis) || axis.length === 0 || !isFinite(value)) {
+      return null;
+    }
+    
+    // Clamp to bounds
+    if (value < axis[0]) {
+      return 0;
+    }
+    if (value > axis[axis.length - 1]) {
+      return axis.length - 1;
+    }
+    
+    // Find the insertion point (searchsorted right, then subtract 1)
+    let insertIdx = axis.length;
+    for (let i = 0; i < axis.length; i++) {
+      if (axis[i] > value) {
+        insertIdx = i;
+        break;
+      }
+    }
+    const idx = insertIdx - 1;
+    return Math.max(0, Math.min(idx, axis.length - 1));
+  },
+
+  /**
+   * Get CSS class for heatmap cell based on hit count
+   * Uses logarithmic scaling for better visualization
+   * @param {number} hits - Number of hits in cell
+   * @param {number} maxHits - Maximum hits across all cells
+   * @returns {string} - CSS class name
+   */
+  getHeatmapColorClass(hits, maxHits) {
+    if (hits === 0 || maxHits === 0) return 'heatmap-cell-0';
+    
+    // Use logarithmic scaling for better visualization of data distribution
+    const logHits = Math.log10(hits + 1);
+    const logMax = Math.log10(maxHits + 1);
+    const ratio = logHits / logMax;
+    
+    // Map to 1-9 color classes (0 is reserved for no data)
+    const colorIndex = Math.min(9, Math.max(1, Math.ceil(ratio * 9)));
+    return `heatmap-cell-${colorIndex}`;
   }
 };
 
