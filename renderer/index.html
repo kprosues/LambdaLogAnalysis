@@ -610,6 +610,16 @@
           </div>
           <div class="fuel-change-stats" id="autotune-suggestedStats"></div>
         </section>
+
+        <!-- MAF Calibration Adjustments -->
+        <section class="anomaly-section">
+          <h2>MAF Calibration Adjustments</h2>
+          <p class="fuel-change-description">Suggested updates to the maf_scale (voltage → g/s) table based on combined closed-loop fuel trims and open-loop lambda error. Each row represents a voltage breakpoint from the tune file.</p>
+          <div class="fuel-change-container" id="autotune-mafChangeTable">
+            <p class="empty-state">No analysis results yet.</p>
+          </div>
+          <div class="fuel-change-stats" id="autotune-mafStats"></div>
+        </section>
       </div>
 
       <!-- Fuel Trim Tab (Combined Short Term + Long Term) -->

@@ -21,7 +21,9 @@ const AutotuneTab = {
     closedChangeTable: null,
     closedStats: null,
     suggestedTable: null,
-    suggestedStats: null
+    suggestedStats: null,
+    mafChangeTable: null,
+    mafStats: null
   },
   analysisResult: null,
   baseTuneData: null,
@@ -48,6 +50,8 @@ const AutotuneTab = {
     this.elements.closedStats = document.getElementById('autotune-closedStats');
     this.elements.suggestedTable = document.getElementById('autotune-suggestedTable');
     this.elements.suggestedStats = document.getElementById('autotune-suggestedStats');
+    this.elements.mafChangeTable = document.getElementById('autotune-mafChangeTable');
+    this.elements.mafStats = document.getElementById('autotune-mafStats');
 
     if (this.elements.form) {
       this.elements.form.addEventListener('submit', (e) => {
@@ -188,12 +192,21 @@ const AutotuneTab = {
       this.renderFuelChangeTables(result);
 
       const summaryMessage = [
-        `Analysis complete. ${result.modificationsApplied || 0} cells updated.`,
+        `Analysis complete. ${result.modificationsApplied || 0} fuel base cells updated.`,
+        result.mafModificationsApplied
+          ? `${result.mafModificationsApplied} MAF cells updated.`
+          : null,
         result.clampedModifications?.length
-          ? `${result.clampedModifications.length} cells were limited to ±${result.changeLimitPercent}% change.`
+          ? `${result.clampedModifications.length} fuel base cells were limited to ±${result.changeLimitPercent}% change.`
+          : null,
+        result.mafClampedModifications?.length
+          ? `${result.mafClampedModifications.length} MAF cells were limited to ±${result.changeLimitPercent}% change.`
           : null,
         result.filteredByCenterWeight
           ? `${result.filteredByCenterWeight} samples filtered by min hit weight (${result.minHitWeight?.toFixed(2)}).`
+          : null,
+        result.mafFilteredByCenterWeight
+          ? `${result.mafFilteredByCenterWeight} MAF samples filtered by min hit weight (${result.minHitWeight?.toFixed(2)}).`
           : null
       ].filter(Boolean).join(' ');
 
@@ -237,6 +250,13 @@ const AutotuneTab = {
       result?.suggestedTable,
       result?.rpmAxis,
       result?.loadAxis
+    );
+
+    // Render MAF calibration changes
+    this.renderMafChangeTable(
+      this.elements.mafChangeTable,
+      this.elements.mafStats,
+      result?.mafCombinedChanges
     );
   },
 
@@ -466,6 +486,116 @@ const AutotuneTab = {
         <span><strong>Total Cells Modified:</strong> ${cellsWithChanges} / ${totalCells}</span>
         <span><strong>Open-Loop Changes:</strong> ${openLoopCells}</span>
         <span><strong>Closed-Loop Changes:</strong> ${closedLoopCells}</span>
+      `;
+    }
+  },
+
+  renderMafChangeTable(container, statsContainer, changes) {
+    if (!container) return;
+
+    container.innerHTML = '';
+    if (statsContainer) statsContainer.innerHTML = '';
+
+    // Show all MAF table rows, not just ones with changes
+    const rows = Array.isArray(changes) ? changes : null;
+
+    if (!rows || rows.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'No analysis results yet. Run analysis to see MAF calibration changes.';
+      container.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'fuel-change-table';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ['Voltage (V)', 'Current (g/s)', 'Suggested (g/s)', 'Change (%)', 'Samples', 'Source', 'Metric'].forEach(text => {
+      const th = document.createElement('th');
+      th.textContent = text;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    let modifiedCells = 0;
+    let sumChange = 0;
+    let totalSamples = 0;
+
+    rows.forEach(entry => {
+      const tr = document.createElement('tr');
+
+      const voltageTd = document.createElement('td');
+      voltageTd.textContent = isFinite(entry.voltage) ? entry.voltage.toFixed(2) : '—';
+      tr.appendChild(voltageTd);
+
+      const currentTd = document.createElement('td');
+      currentTd.textContent = isFinite(entry.current) ? entry.current.toFixed(2) : '—';
+      tr.appendChild(currentTd);
+
+      const suggestedTd = document.createElement('td');
+      suggestedTd.textContent = isFinite(entry.suggested) ? entry.suggested.toFixed(2) : '—';
+      tr.appendChild(suggestedTd);
+
+      const changeTd = document.createElement('td');
+      const changeSign = entry.changePct >= 0 ? '+' : '';
+      changeTd.textContent = isFinite(entry.changePct)
+        ? `${changeSign}${entry.changePct.toFixed(2)}%`
+        : '—';
+      changeTd.className = this.getFuelChangeColorClass(entry.changePct);
+      tr.appendChild(changeTd);
+
+      const samplesTd = document.createElement('td');
+      samplesTd.textContent = entry.samples ? entry.samples.toLocaleString() : '0';
+      tr.appendChild(samplesTd);
+
+      const sourceTd = document.createElement('td');
+      sourceTd.textContent = entry.source
+        ? (entry.source === 'open' ? 'Open-Loop' : 'Closed-Loop')
+        : '—';
+      tr.appendChild(sourceTd);
+
+      const metricTd = document.createElement('td');
+      if (entry.metricLabel && entry.metricValue !== undefined && entry.metricValue !== null) {
+        metricTd.textContent = `${entry.metricLabel}: ${entry.metricValue.toFixed(2)}%`;
+      } else {
+        metricTd.textContent = '—';
+      }
+      tr.appendChild(metricTd);
+
+      tr.title = `Voltage: ${isFinite(entry.voltage) ? entry.voltage.toFixed(2) : 'N/A'} V\n` +
+        `Current: ${isFinite(entry.current) ? entry.current.toFixed(2) : 'N/A'} g/s\n` +
+        `Suggested: ${isFinite(entry.suggested) ? entry.suggested.toFixed(2) : 'N/A'} g/s\n` +
+        `Change: ${isFinite(entry.changePct) ? `${changeSign}${entry.changePct.toFixed(2)}%` : 'N/A'}\n` +
+        (entry.metricLabel && entry.metricValue !== undefined && entry.metricValue !== null
+          ? `${entry.metricLabel}: ${entry.metricValue.toFixed(2)}%\n`
+          : '') +
+        `Samples: ${entry.samples ? entry.samples.toLocaleString() : '0'}\n` +
+        (entry.source ? `Source: ${entry.source === 'open' ? 'Open-Loop' : 'Closed-Loop'}` : '');
+
+      if (entry.hasChange && isFinite(entry.changePct)) {
+        modifiedCells++;
+        sumChange += entry.changePct;
+      }
+      totalSamples += entry.samples || 0;
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    if (statsContainer) {
+      const avgChange = modifiedCells > 0 ? sumChange / modifiedCells : 0;
+      const rowsWithData = rows.filter(r => r && r.samples > 0).length;
+      statsContainer.innerHTML = `
+        <span><strong>Rows with Data:</strong> ${rowsWithData} / ${rows.length}</span>
+        <span><strong>Rows with Changes:</strong> ${modifiedCells}</span>
+        <span><strong>Total Samples:</strong> ${totalSamples.toLocaleString()}</span>
+        <span><strong>Avg Change:</strong> ${avgChange >= 0 ? '+' : ''}${avgChange.toFixed(2)}%</span>
       `;
     }
   },

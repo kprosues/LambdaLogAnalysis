@@ -7,7 +7,8 @@
     'Power Mode - Fuel Ratio Target (λ)',
     'Fuel Trim - Short Term (%)',
     'Fuel Trim - Long Term (%)',
-    'Throttle Position (%)'
+    'Throttle Position (%)',
+    'Mass Air Flow Voltage (V)'
   ];
 
   function axisIndex(value, axis, clamp = true) {
@@ -57,6 +58,50 @@
       const num = parseFloat(val);
       return isNaN(num) ? 0 : num;
     });
+  }
+
+  // Default max MAF voltage for building the voltage axis when not specified in tune file.
+  // Most automotive MAF sensors output 0-5V; 5.12V provides a small margin for sensor variance.
+  // Common MAF table lengths: 64 points (Subaru), 32 points, 16 points.
+  const DEFAULT_MAX_MAF_VOLTAGE = 5.0;
+
+  function buildDefaultMafVoltageAxis(length) {
+    if (!length || length < 1) {
+      return [];
+    }
+    if (length === 1) {
+      return [0];
+    }
+    const axis = [];
+    const step = DEFAULT_MAX_MAF_VOLTAGE / (length - 1);
+    for (let i = 0; i < length; i++) {
+      const voltage = i * step;
+      axis.push(parseFloat(voltage.toFixed(3)));
+    }
+    return axis;
+  }
+
+  function getMafVoltageAxis(tuneParser, expectedLength) {
+    if (!tuneParser) {
+      return buildDefaultMafVoltageAxis(expectedLength);
+    }
+
+    const candidateIds = [
+      'maf_voltage',
+      'maf_voltage_index',
+      'maf_scale_voltage',
+      'maf_scale_voltage_index'
+    ];
+
+    for (const id of candidateIds) {
+      if (!id) continue;
+      const arr = ensureNumberArray(tuneParser.getArray(id));
+      if (arr.length) {
+        return arr;
+      }
+    }
+
+    return buildDefaultMafVoltageAxis(expectedLength);
   }
 
   /**
@@ -155,6 +200,8 @@
     const fuelBaseTable = window.tuneFileParser.getTable('fuel_base');
     const peEnableLoad = ensureNumberArray(window.tuneFileParser.getArray('pe_enable_load'));
     const peEnableTps = ensureNumberArray(window.tuneFileParser.getArray('pe_enable_tps'));
+    const mafScale = ensureNumberArray(window.tuneFileParser.getArray('maf_scale'));
+    const mafVoltageAxis = getMafVoltageAxis(window.tuneFileParser, mafScale.length);
 
     if (!rpmAxis.length || !loadAxis.length || !fuelBaseTable) {
       return { error: 'Tune file is missing required base spark/fuel tables.' };
@@ -166,6 +213,18 @@
 
     if (peEnableLoad.length !== rpmAxis.length || peEnableTps.length !== rpmAxis.length) {
       return { error: 'PE enable tables do not match RPM axis length.' };
+    }
+
+    if (!mafScale.length) {
+      return { error: 'Tune file is missing the maf_scale table.' };
+    }
+
+    if (!mafVoltageAxis.length) {
+      return { error: 'Unable to determine MAF voltage axis from tune file.' };
+    }
+
+    if (mafVoltageAxis.length !== mafScale.length) {
+      return { error: 'MAF voltage axis length does not match maf_scale table length.' };
     }
 
     // Process all rows: filter valid data, classify loop state, then bin by RPM/Load
@@ -187,6 +246,53 @@
     const hitCounts = Array.from({ length: rpmAxis.length }, () => 
       Array.from({ length: loadAxis.length }, () => 0)
     );
+    
+    // MAF-specific accumulators
+    const mafOpenBins = {};
+    const mafClosedBins = {};
+    const mafHitCounts = Array.from({ length: mafVoltageAxis.length }, () => 0);
+    let totalMafOpenSamples = 0;
+    let totalMafClosedSamples = 0;
+    let rowsMissingMafVoltage = 0;
+    let mafFilteredByCenterWeight = 0;
+    
+    function accumulateMafOpenSample(idx, weight, ratio) {
+      if (idx === null || weight === null) {
+        return;
+      }
+      if (weight < minHitWeight) {
+        mafFilteredByCenterWeight += 1;
+        return;
+      }
+      const key = `${idx}`;
+      if (!mafOpenBins[key]) {
+        mafOpenBins[key] = { idx, samples: 0, totalWeight: 0, weightedSumRatio: 0 };
+      }
+      const entry = mafOpenBins[key];
+      entry.samples += 1;
+      entry.totalWeight += weight;
+      entry.weightedSumRatio += ratio * weight;
+      totalMafOpenSamples += 1;
+    }
+    
+    function accumulateMafClosedSample(idx, weight, trim) {
+      if (idx === null || weight === null) {
+        return;
+      }
+      if (weight < minHitWeight) {
+        mafFilteredByCenterWeight += 1;
+        return;
+      }
+      const key = `${idx}`;
+      if (!mafClosedBins[key]) {
+        mafClosedBins[key] = { idx, samples: 0, totalWeight: 0, weightedSumTrim: 0 };
+      }
+      const entry = mafClosedBins[key];
+      entry.samples += 1;
+      entry.totalWeight += weight;
+      entry.weightedSumTrim += trim * weight;
+      totalMafClosedSamples += 1;
+    }
 
     data.forEach(row => {
       const rpm = parseFloat(row['Engine Speed (rpm)']);
@@ -194,6 +300,7 @@
       const lambdaActual = parseFloat(row['Air/Fuel Sensor #1 (λ)']);
       const lambdaTarget = parseFloat(row['Power Mode - Fuel Ratio Target (λ)']);
       const throttle = parseFloat(row['Throttle Position (%)']);
+      const mafVoltage = parseFloat(row['Mass Air Flow Voltage (V)']);
 
       // Filter: require valid rpm, load, lambda_actual, lambda_target (matching Python dropna)
       if (!isFinite(rpm) || !isFinite(load) || !isFinite(lambdaActual) || !isFinite(lambdaTarget)) {
@@ -206,6 +313,20 @@
       if (rpmIdx === null || loadIdx === null) {
         skippedRows += 1;
         return;
+      }
+      
+      let mafIdx = null;
+      let mafWeight = null;
+      if (isFinite(mafVoltage)) {
+        mafIdx = axisIndex(mafVoltage, mafVoltageAxis);
+        if (mafIdx !== null) {
+          mafHitCounts[mafIdx] += 1;
+          mafWeight = calculateAxisWeight(mafVoltage, mafIdx, mafVoltageAxis);
+        } else {
+          rowsMissingMafVoltage += 1;
+        }
+      } else {
+        rowsMissingMafVoltage += 1;
       }
 
       // Increment hit count for heatmap (track all valid data points regardless of loop state)
@@ -220,14 +341,18 @@
         ? peEnableTps[rpmIdx] 
         : Infinity;
       
-      // Classify loop state (matching Python classify_loop_state):
+      // Classify loop state based on ECU_TUNE_FILE_MODEL.md:
       // Open loop (PE mode) is active when:
       // - Load >= pe_enable_load threshold for current RPM
       // - TPS >= pe_enable_tps threshold for current RPM
-      // - Lambda target indicates PE mode (lambda_target < 1.0)
-      // Note: lambda_target > 0 filter is applied AFTER classification (matching Python)
-      const isOpenLoop = lambdaTarget < 1.0 &&
-        load >= loadThreshold && throttle >= tpsThreshold;
+      // 
+      // Per the documentation: "PE mode activates when load and TPS thresholds are exceeded"
+      // In PE mode, STFT is DISABLED but LTFT corrections are still applied.
+      // The lambda target comes from pe_initial/pe_safe tables (range: 0.831 to 1.000).
+      // 
+      // Note: We do NOT check lambdaTarget < 1.0 because PE tables CAN have lambda = 1.0
+      // at lower load/RPM cells. The PE enable conditions alone determine open vs closed loop.
+      const isOpenLoop = load >= loadThreshold && throttle >= tpsThreshold;
 
       if (isOpenLoop) {
         // Filter: lambda_target > 0 (matching Python: open_rows = open_rows[open_rows["lambda_target"] > 0])
@@ -242,17 +367,22 @@
           return;
         }
         
-        // Calculate cell weight based on how centered the data point is
+        // Calculate lambda ratio (measured vs target)
+        const ratio = lambdaActual / lambdaTarget;
+        
+        // Accumulate MAF samples independently of fuel-base cell weight
+        // MAF uses its own 1D weight based on voltage bin centering
+        accumulateMafOpenSample(mafIdx, mafWeight, ratio);
+        
+        // Calculate cell weight based on how centered the data point is in RPM/Load grid
         const cellWeight = calculateCellWeight(rpm, load, rpmIdx, loadIdx, rpmAxis, loadAxis);
         
-        // Filter by minimum hit weight threshold
+        // Filter by minimum hit weight threshold for fuel-base accumulation
         if (cellWeight < minHitWeight) {
           filteredByCenterWeight += 1;
           return;
         }
         
-        // Calculate lambda ratio (measured vs target)
-        const ratio = lambdaActual / lambdaTarget;
         const key = `${rpmIdx}_${loadIdx}`;
         if (!openBins[key]) {
           openBins[key] = { rpmIdx, loadIdx, samples: 0, totalWeight: 0, weightedSumRatio: 0 };
@@ -272,10 +402,14 @@
           : 0.0;
         const combined = stft + ltft;
         
-        // Calculate cell weight based on how centered the data point is
+        // Accumulate MAF samples independently of fuel-base cell weight
+        // MAF uses its own 1D weight based on voltage bin centering
+        accumulateMafClosedSample(mafIdx, mafWeight, combined);
+        
+        // Calculate cell weight based on how centered the data point is in RPM/Load grid
         const cellWeight = calculateCellWeight(rpm, load, rpmIdx, loadIdx, rpmAxis, loadAxis);
         
-        // Filter by minimum hit weight threshold
+        // Filter by minimum hit weight threshold for fuel-base accumulation
         if (cellWeight < minHitWeight) {
           filteredByCenterWeight += 1;
           return;
@@ -339,8 +473,50 @@
       })
       .sort((a, b) => Math.abs(b.meanTrim) - Math.abs(a.meanTrim));
 
+    const mafOpenSummary = Object.values(mafOpenBins)
+      .filter(entry => entry.samples >= minSamples)
+      .map(entry => {
+        const weightedMeanRatio = entry.totalWeight > 0
+          ? entry.weightedSumRatio / entry.totalWeight
+          : 1.0;
+        const avgWeight = entry.samples > 0 ? entry.totalWeight / entry.samples : 0;
+        const currentValue = mafScale[entry.idx] || 0;
+        const suggestedValue = currentValue * weightedMeanRatio;
+        return {
+          idx: entry.idx,
+          voltage: mafVoltageAxis[entry.idx],
+          samples: entry.samples,
+          avgWeight,
+          meanRatio: weightedMeanRatio,
+          meanErrorPct: (weightedMeanRatio - 1) * 100,
+          currentGs: currentValue,
+          suggestedGs: suggestedValue
+        };
+      })
+      .sort((a, b) => Math.abs(b.meanErrorPct) - Math.abs(a.meanErrorPct));
+
+    const mafClosedSummary = Object.values(mafClosedBins)
+      .filter(entry => entry.samples >= minSamples)
+      .map(entry => {
+        const weightedMeanTrim = entry.totalWeight > 0
+          ? entry.weightedSumTrim / entry.totalWeight
+          : 0.0;
+        const avgWeight = entry.samples > 0 ? entry.totalWeight / entry.samples : 0;
+        const currentValue = mafScale[entry.idx] || 0;
+        const suggestedValue = currentValue * (1 + weightedMeanTrim / 100);
+        return {
+          idx: entry.idx,
+          voltage: mafVoltageAxis[entry.idx],
+          samples: entry.samples,
+          avgWeight,
+          meanTrim: weightedMeanTrim,
+          currentGs: currentValue,
+          suggestedGs: suggestedValue
+        };
+      })
+      .sort((a, b) => Math.abs(b.meanTrim) - Math.abs(a.meanTrim));
+
     const cloneTable = clone2DArray(fuelBaseTable);
-    const changeLimitFraction = changeLimit / 100;
     const modifications = new Map();
 
     closedSummary.forEach(row => {
@@ -360,7 +536,8 @@
     modifications.forEach(row => {
       // Get the original value from the analysis tune file (for change limit baseline)
       const sourceOriginal = fuelBaseTable[row.rpmIdx][row.loadIdx] || 0;
-      if (!isFinite(sourceOriginal)) {
+      if (!isFinite(sourceOriginal) || sourceOriginal === 0) {
+        // Cannot compute meaningful change for zero or invalid values
         return;
       }
       
@@ -393,6 +570,50 @@
       cloneTable[row.rpmIdx][row.loadIdx] = targetValue;
     });
 
+    const mafCloneScale = mafScale.slice();
+    const mafModifications = new Map();
+
+    mafClosedSummary.forEach(row => {
+      const key = row.idx;
+      mafModifications.set(key, { ...row, source: 'closed' });
+    });
+
+    mafOpenSummary.forEach(row => {
+      const key = row.idx;
+      mafModifications.set(key, { ...row, source: 'open' });
+    });
+
+    const mafClampedDetails = [];
+    mafModifications.forEach(row => {
+      const sourceOriginal = mafScale[row.idx] || 0;
+      if (!isFinite(sourceOriginal) || sourceOriginal === 0) {
+        // Cannot scale zero values - leave unchanged
+        return;
+      }
+
+      let targetValue = row.suggestedGs;
+      const changePct = ((row.suggestedGs - sourceOriginal) / sourceOriginal) * 100.0;
+
+      if (changeLimit > 0 && Math.abs(changePct) > changeLimit) {
+        if (changePct > 0) {
+          targetValue = sourceOriginal * (1.0 + changeLimit / 100.0);
+        } else {
+          targetValue = sourceOriginal * (1.0 - changeLimit / 100.0);
+        }
+
+        mafClampedDetails.push({
+          voltage: row.voltage,
+          original: sourceOriginal,
+          suggested: row.suggestedGs,
+          applied: targetValue,
+          changePct: changePct,
+          source: row.source
+        });
+      }
+
+      mafCloneScale[row.idx] = targetValue;
+    });
+
     // Build 2D tables for open-loop and closed-loop change visualization
     // Each cell contains: { current, suggested, changePct, samples, source } or null if no data
     const openChangeTable = Array.from({ length: rpmAxis.length }, () => 
@@ -410,7 +631,9 @@
 
     // Populate open-loop change table
     openSummary.forEach(row => {
-      const changePct = ((row.suggestedFuelBase - row.currentFuelBase) / row.currentFuelBase) * 100;
+      const changePct = row.currentFuelBase !== 0
+        ? ((row.suggestedFuelBase - row.currentFuelBase) / row.currentFuelBase) * 100
+        : 0;
       openChangeTable[row.rpmIdx][row.loadIdx] = {
         current: row.currentFuelBase,
         suggested: row.suggestedFuelBase,
@@ -423,7 +646,9 @@
 
     // Populate closed-loop change table
     closedSummary.forEach(row => {
-      const changePct = ((row.suggestedFuelBase - row.currentFuelBase) / row.currentFuelBase) * 100;
+      const changePct = row.currentFuelBase !== 0
+        ? ((row.suggestedFuelBase - row.currentFuelBase) / row.currentFuelBase) * 100
+        : 0;
       closedChangeTable[row.rpmIdx][row.loadIdx] = {
         current: row.currentFuelBase,
         suggested: row.suggestedFuelBase,
@@ -468,6 +693,50 @@
       }
     }
 
+    const mafOpenSummaryMap = new Map(mafOpenSummary.map(entry => [entry.idx, entry]));
+    const mafClosedSummaryMap = new Map(mafClosedSummary.map(entry => [entry.idx, entry]));
+    const mafCombinedChanges = mafVoltageAxis.map((voltage, idx) => {
+      const current = mafScale[idx] || 0;
+      const suggested = mafCloneScale[idx];
+      const changePct = current !== 0 ? ((suggested - current) / current) * 100 : 0;
+      const hasChange = Math.abs(changePct) > 0.01;
+
+      let source = null;
+      let samples = 0;
+      let metricLabel = null;
+      let metricValue = null;
+      if (mafOpenSummaryMap.has(idx)) {
+        const entry = mafOpenSummaryMap.get(idx);
+        source = 'open';
+        samples = entry.samples;
+        metricLabel = 'Lambda Error';
+        metricValue = entry.meanErrorPct;
+      } else if (mafClosedSummaryMap.has(idx)) {
+        const entry = mafClosedSummaryMap.get(idx);
+        source = 'closed';
+        samples = entry.samples;
+        metricLabel = 'Mean Trim';
+        metricValue = entry.meanTrim;
+      }
+
+      return {
+        idx,
+        voltage,
+        current,
+        suggested,
+        changePct,
+        hasChange,
+        source,
+        samples,
+        metricLabel,
+        metricValue
+      };
+    });
+
+    const mafScaleStrings = [
+      mafCloneScale.map(val => (isFinite(val) ? val.toFixed(2) : '0.00')).join(', ')
+    ];
+
     return {
       openSummary,
       closedSummary,
@@ -491,12 +760,27 @@
       closedChangeTable,
       openHitCounts,
       closedHitCounts,
-      suggestedTable
+      suggestedTable,
+      // MAF calibration details
+      mafOpenSummary,
+      mafClosedSummary,
+      mafModificationsApplied: mafModifications.size,
+      mafClampedModifications: mafClampedDetails,
+      mafScaleStrings,
+      mafVoltageAxis,
+      mafScale,
+      mafSuggestedScale: mafCloneScale,
+      mafCombinedChanges,
+      mafHitCounts,
+      totalMafOpenSamples,
+      totalMafClosedSamples,
+      rowsMissingMafVoltage,
+      mafFilteredByCenterWeight
     };
   }
 
   function downloadTune(result, filename, baseTuneData = null) {
-    if (!result || !Array.isArray(result.fuelBaseStrings)) {
+    if (!result || !Array.isArray(result.fuelBaseStrings) || !Array.isArray(result.mafScaleStrings)) {
       return { error: 'Run the autotune analysis before downloading a tune file.' };
     }
 
@@ -526,6 +810,15 @@
       return { error: 'fuel_base map not found in tune file.' };
     }
 
+    const mafScaleMap = tuneData.maps.find(entry => entry.id === 'maf_scale');
+    if (!mafScaleMap) {
+      return { error: 'maf_scale map not found in tune file.' };
+    }
+
+    const expectedMafLength = Array.isArray(result.mafSuggestedScale)
+      ? result.mafSuggestedScale.length
+      : 0;
+
     // Validate that the fuel_base table dimensions match (if using base tune file)
     if (baseTuneData) {
       if (!window.tuneFileParser || !window.tuneFileParser.isLoaded()) {
@@ -548,6 +841,7 @@
       const baseFuelBaseTable = baseTuneParser.getTable('fuel_base');
       const baseRpmAxis = ensureNumberArray(baseTuneParser.getArray('base_spark_rpm_index'));
       const baseLoadAxis = ensureNumberArray(baseTuneParser.getArray('base_spark_map_index'));
+      const baseMafScale = ensureNumberArray(baseTuneParser.getArray('maf_scale'));
 
       if (!baseFuelBaseTable || !baseRpmAxis || !baseLoadAxis) {
         return { error: 'Base tune file is missing required fuel_base table or axis data.' };
@@ -556,14 +850,16 @@
       if (baseFuelBaseTable.length !== rpmAxis.length || 
           baseFuelBaseTable[0]?.length !== loadAxis.length ||
           baseRpmAxis.length !== rpmAxis.length ||
-          baseLoadAxis.length !== loadAxis.length) {
+          baseLoadAxis.length !== loadAxis.length ||
+          !baseMafScale || (expectedMafLength && baseMafScale.length !== expectedMafLength)) {
         return { 
-          error: 'Base tune file fuel_base table dimensions or axis lengths do not match the analysis tune file. The base tune file must use the same RPM and Load axis structure as the tune file used for analysis.' 
+          error: 'Base tune file tables or axes do not match the tune file used for analysis. Ensure RPM, Load, and MAF calibration structures align.' 
         };
       }
     }
 
     fuelBaseMap.data = result.fuelBaseStrings;
+    mafScaleMap.data = result.mafScaleStrings;
 
     const fileName = (filename || 'autotuned_tune.tune').trim() || 'autotuned_tune.tune';
     const lowerFileName = fileName.toLowerCase();
