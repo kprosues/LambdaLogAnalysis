@@ -180,6 +180,7 @@
     const minSamples = Math.max(1, parseInt(options.minSamples || 5, 10));
     const changeLimit = Math.max(0, parseFloat(options.changeLimit || 5));
     const minHitWeight = Math.max(0, Math.min(1, parseFloat(options.minHitWeight || 0)));
+    const additionalLogsData = options.additionalLogsData || [];
 
     if (!window.tuneFileParser || !window.tuneFileParser.isLoaded()) {
       return { error: 'Please load a tune file before running autotune.' };
@@ -189,15 +190,29 @@
       return { error: 'Please load at least one datalog before running autotune.' };
     }
 
-    const data = window.dataProcessor.getData();
+    const primaryData = window.dataProcessor.getData();
     const columns = window.dataProcessor.getColumns();
 
-    if (!Array.isArray(data) || data.length === 0) {
+    if (!Array.isArray(primaryData) || primaryData.length === 0) {
       return { error: 'No datalog data available. Load a datalog and try again.' };
     }
 
     if (!columns || !Array.isArray(columns)) {
       return { error: 'Unable to determine datalog columns.' };
+    }
+
+    // Combine primary data with additional logs data
+    let data = [...primaryData];
+    let additionalRowCount = 0;
+    
+    if (additionalLogsData && additionalLogsData.length > 0) {
+      additionalLogsData.forEach(logEntry => {
+        if (logEntry.data && Array.isArray(logEntry.data)) {
+          data = data.concat(logEntry.data);
+          additionalRowCount += logEntry.data.length;
+        }
+      });
+      console.log(`Combined ${primaryData.length} primary rows + ${additionalRowCount} additional rows = ${data.length} total rows`);
     }
 
     // Build required columns based on mode
@@ -343,7 +358,9 @@
       let mafIdx = null;
       let mafWeight = null;
       if (mode === TUNING_MODES.MAF_SCALE) {
-        if (isFinite(mafVoltage)) {
+        // Filter: reject very low MAF voltage (idle noise)
+        // Per MAF_SCALE_TUNING_GUIDE.md: reject maf_voltage < 0.5V
+        if (isFinite(mafVoltage) && mafVoltage >= 0.5) {
           mafIdx = axisIndex(mafVoltage, mafVoltageAxis);
           if (mafIdx !== null) {
             mafHitCounts[mafIdx] += 1;
@@ -385,20 +402,35 @@
       const isOpenLoop = load >= loadThreshold && throttle >= tpsThreshold;
 
       if (isOpenLoop) {
-        // Filter: lambda_target > 0 (matching Python: open_rows = open_rows[open_rows["lambda_target"] > 0])
-        if (lambdaTarget <= 0) {
+        // Filter: minimum RPM to avoid idle/tip-in transients
+        // Per MAF_SCALE_TUNING_GUIDE.md: RPM >= 2000 for open-loop
+        if (rpm < 2000) {
           skippedRows += 1;
           return;
         }
         
-        // Filter: lambda_actual must be valid and > 0
-        if (lambdaActual <= 0) {
+        // Filter: lambda_target must be in valid PE range (0.7-1.0)
+        // Per MAF_SCALE_TUNING_GUIDE.md: valid PE lambda targets are 0.75-1.0
+        if (lambdaTarget <= 0.7 || lambdaTarget > 1.0) {
+          skippedRows += 1;
+          return;
+        }
+        
+        // Filter: lambda_actual must be valid and reasonable (0.6-1.5)
+        if (lambdaActual <= 0.6 || lambdaActual > 1.5) {
           skippedRows += 1;
           return;
         }
         
         // Calculate lambda ratio (measured vs target)
         const ratio = lambdaActual / lambdaTarget;
+        
+        // Filter: reject outlier lambda ratios (wideband noise/errors)
+        // Per MAF_SCALE_TUNING_GUIDE.md: valid range is 0.85-1.15
+        if (ratio < 0.85 || ratio > 1.15) {
+          skippedRows += 1;
+          return;
+        }
         
         // Accumulate MAF samples (only in MAF mode)
         accumulateMafOpenSample(mafIdx, mafWeight, ratio);
@@ -814,6 +846,11 @@
       minSamples,
       minHitWeight,
       skippedRows,
+      // Data source information
+      totalDataRows: data.length,
+      primaryDataRows: primaryData.length,
+      additionalDataRows: additionalRowCount,
+      additionalLogsCount: additionalLogsData.length,
       // Fuel-base specific results (only populated for fuel_base mode)
       openSummary,
       closedSummary,

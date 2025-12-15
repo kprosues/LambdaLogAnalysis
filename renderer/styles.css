@@ -1133,6 +1133,68 @@ body.dark-mode .tooltip-field-item label {
   color: #a71d2a;
 }
 
+/* Additional Datalogs List Styles */
+.additional-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.additional-log-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: #f0f9ff;
+  border: 1px solid #b8daff;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+body.dark-mode .additional-log-item {
+  background: #1e3a5f;
+  border-color: #4a6fa5;
+}
+
+.additional-log-info {
+  color: #004085;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.dark-mode .additional-log-info {
+  color: #93c5fd;
+}
+
+.additional-log-remove {
+  background: transparent;
+  border: none;
+  color: #dc3545;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  margin-left: 8px;
+  transition: color 0.2s ease;
+}
+
+.additional-log-remove:hover {
+  color: #a71d2a;
+}
+
+body.dark-mode .additional-log-remove {
+  color: #f87171;
+}
+
+body.dark-mode .additional-log-remove:hover {
+  color: #fca5a5;
+}
+
 .empty-state {
   color: #666;
   font-style: italic;

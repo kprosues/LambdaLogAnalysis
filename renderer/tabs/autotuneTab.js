@@ -11,6 +11,10 @@ const AutotuneTab = {
     baseTuneFile: null,
     clearBaseTune: null,
     baseTuneFileName: null,
+    additionalLogs: null,
+    clearAdditionalLogs: null,
+    additionalLogsList: null,
+    additionalLogsStats: null,
     runBtn: null,
     downloadBtn: null,
     message: null,
@@ -31,6 +35,7 @@ const AutotuneTab = {
   },
   analysisResult: null,
   baseTuneData: null,
+  additionalLogsData: [], // Array to store parsed data from additional logs
 
   initialize() {
     this.elements.form = document.getElementById('autotune-form');
@@ -43,6 +48,10 @@ const AutotuneTab = {
     this.elements.baseTuneFile = document.getElementById('autotune-baseTuneFile');
     this.elements.clearBaseTune = document.getElementById('autotune-clearBaseTune');
     this.elements.baseTuneFileName = document.getElementById('autotune-baseTuneFileName');
+    this.elements.additionalLogs = document.getElementById('autotune-additionalLogs');
+    this.elements.clearAdditionalLogs = document.getElementById('autotune-clearAdditionalLogs');
+    this.elements.additionalLogsList = document.getElementById('autotune-additionalLogsList');
+    this.elements.additionalLogsStats = document.getElementById('autotune-additionalLogsStats');
     this.elements.runBtn = document.getElementById('autotune-runBtn');
     this.elements.downloadBtn = document.getElementById('autotune-downloadBtn');
     this.elements.message = document.getElementById('autotune-message');
@@ -78,6 +87,20 @@ const AutotuneTab = {
       this.elements.clearBaseTune.addEventListener('click', (e) => {
         e.preventDefault();
         this.clearBaseTuneFile();
+      });
+    }
+
+    // Additional datalogs handlers
+    if (this.elements.additionalLogs) {
+      this.elements.additionalLogs.addEventListener('change', (e) => {
+        this.handleAdditionalLogsChange(e);
+      });
+    }
+
+    if (this.elements.clearAdditionalLogs) {
+      this.elements.clearAdditionalLogs.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.clearAdditionalLogs();
       });
     }
 
@@ -170,6 +193,183 @@ const AutotuneTab = {
     }
   },
 
+  async handleAdditionalLogsChange(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    this.setMessage(`Loading ${files.length} additional datalog(s)...`, 'info');
+
+    let loadedCount = 0;
+    let totalRows = 0;
+
+    for (const file of files) {
+      try {
+        const text = await file.text();
+        const parsedData = await this.parseCSVContent(text);
+        
+        if (parsedData && parsedData.length > 0) {
+          this.additionalLogsData.push({
+            name: file.name,
+            data: parsedData,
+            rowCount: parsedData.length
+          });
+          loadedCount++;
+          totalRows += parsedData.length;
+        }
+      } catch (error) {
+        console.error(`Error loading ${file.name}:`, error);
+        this.setMessage(`Error loading ${file.name}: ${error.message}`, 'error');
+      }
+    }
+
+    // Update UI
+    this.updateAdditionalLogsList();
+    
+    if (loadedCount > 0) {
+      this.setMessage(`Loaded ${loadedCount} additional datalog(s) with ${totalRows.toLocaleString()} total rows.`, 'success');
+    }
+
+    // Clear file input so the same files can be selected again if needed
+    if (this.elements.additionalLogs) {
+      this.elements.additionalLogs.value = '';
+    }
+
+    // Show clear button
+    if (this.elements.clearAdditionalLogs && this.additionalLogsData.length > 0) {
+      this.elements.clearAdditionalLogs.style.display = 'block';
+    }
+  },
+
+  async parseCSVContent(csvContent) {
+    return new Promise((resolve, reject) => {
+      Papa.parse(csvContent, {
+        header: true,
+        skipEmptyLines: true,
+        dynamicTyping: true,
+        complete: (results) => {
+          if (results.errors && results.errors.length > 0) {
+            console.warn('CSV parsing warnings:', results.errors);
+          }
+
+          // Filter and process data
+          let data = results.data || [];
+          
+          // Filter rows with valid time
+          data = data.filter(row => {
+            return row && row['Time (s)'] !== null && row['Time (s)'] !== undefined && !isNaN(row['Time (s)']);
+          });
+
+          // Convert numeric columns
+          const numericColumns = [
+            'Time (s)',
+            'Engine Speed (rpm)',
+            'Load (MAF) (g/rev)',
+            'Air/Fuel Sensor #1 (λ)',
+            'Power Mode - Fuel Ratio Target (λ)',
+            'Fuel Trim - Short Term (%)',
+            'Fuel Trim - Long Term (%)',
+            'Throttle Position (%)',
+            'Mass Air Flow Voltage (V)'
+          ];
+
+          data = data.map(row => {
+            const processedRow = { ...row };
+            numericColumns.forEach(col => {
+              if (processedRow[col] !== undefined && processedRow[col] !== null) {
+                const num = parseFloat(processedRow[col]);
+                processedRow[col] = isNaN(num) ? 0 : num;
+              }
+            });
+            return processedRow;
+          });
+
+          resolve(data);
+        },
+        error: (error) => {
+          reject(new Error(`CSV parsing failed: ${error.message}`));
+        }
+      });
+    });
+  },
+
+  clearAdditionalLogs() {
+    this.additionalLogsData = [];
+    this.updateAdditionalLogsList();
+    
+    if (this.elements.additionalLogs) {
+      this.elements.additionalLogs.value = '';
+    }
+    if (this.elements.clearAdditionalLogs) {
+      this.elements.clearAdditionalLogs.style.display = 'none';
+    }
+    if (this.elements.additionalLogsStats) {
+      this.elements.additionalLogsStats.textContent = '';
+    }
+  },
+
+  removeAdditionalLog(index) {
+    if (index >= 0 && index < this.additionalLogsData.length) {
+      this.additionalLogsData.splice(index, 1);
+      this.updateAdditionalLogsList();
+      
+      if (this.additionalLogsData.length === 0) {
+        if (this.elements.clearAdditionalLogs) {
+          this.elements.clearAdditionalLogs.style.display = 'none';
+        }
+        if (this.elements.additionalLogsStats) {
+          this.elements.additionalLogsStats.textContent = '';
+        }
+      }
+    }
+  },
+
+  updateAdditionalLogsList() {
+    const container = this.elements.additionalLogsList;
+    const statsContainer = this.elements.additionalLogsStats;
+    
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (this.additionalLogsData.length === 0) {
+      return;
+    }
+
+    let totalRows = 0;
+    
+    this.additionalLogsData.forEach((log, index) => {
+      totalRows += log.rowCount;
+      
+      const item = document.createElement('div');
+      item.className = 'additional-log-item';
+      
+      const info = document.createElement('span');
+      info.className = 'additional-log-info';
+      info.textContent = `${log.name} (${log.rowCount.toLocaleString()} rows)`;
+      
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'additional-log-remove';
+      removeBtn.textContent = '×';
+      removeBtn.title = 'Remove this datalog';
+      removeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.removeAdditionalLog(index);
+      });
+      
+      item.appendChild(info);
+      item.appendChild(removeBtn);
+      container.appendChild(item);
+    });
+
+    // Update stats
+    if (statsContainer) {
+      statsContainer.textContent = `${this.additionalLogsData.length} additional log(s) loaded with ${totalRows.toLocaleString()} total rows`;
+    }
+  },
+
   render() {
     // Nothing to render on tab switch (form driven), but ensure loading overlay hidden
     const content = document.querySelector('.tab-content[data-tab="autotune"]');
@@ -205,11 +405,21 @@ const AutotuneTab = {
     const minHitWeight = parseFloat(this.elements.minHitWeight?.value || '0') || 0;
 
     const modeLabel = mode === 'maf_scale' ? 'MAF Calibration' : 'Base Fuel';
-    this.setMessage(`Running ${modeLabel} autotune analysis...`, 'info');
+    const additionalLogsCount = this.additionalLogsData.length;
+    const logMessage = additionalLogsCount > 0 
+      ? `Running ${modeLabel} autotune analysis with ${additionalLogsCount} additional log(s)...`
+      : `Running ${modeLabel} autotune analysis...`;
+    this.setMessage(logMessage, 'info');
     this.toggleDownloadButton(false);
 
     try {
-      const result = window.AutotuneEngine.analyze({ mode, minSamples, changeLimit, minHitWeight });
+      const result = window.AutotuneEngine.analyze({ 
+        mode, 
+        minSamples, 
+        changeLimit, 
+        minHitWeight,
+        additionalLogsData: this.additionalLogsData 
+      });
       if (result.error) {
         this.analysisResult = null;
         this.renderHeatmap(null, null, null);
@@ -237,9 +447,14 @@ const AutotuneTab = {
 
       // Build mode-specific summary message
       let summaryMessage;
+      const dataSourceInfo = result.additionalLogsCount > 0
+        ? `Analyzed ${result.totalDataRows?.toLocaleString() || 0} total rows (${result.primaryDataRows?.toLocaleString() || 0} primary + ${result.additionalDataRows?.toLocaleString() || 0} from ${result.additionalLogsCount} additional log(s)).`
+        : null;
+      
       if (result.mode === 'fuel_base') {
         summaryMessage = [
           `Analysis complete. ${result.modificationsApplied || 0} fuel base cells updated.`,
+          dataSourceInfo,
           result.clampedModifications?.length
             ? `${result.clampedModifications.length} cells were limited to ±${result.changeLimitPercent}% change.`
             : null,
@@ -250,6 +465,7 @@ const AutotuneTab = {
       } else {
         summaryMessage = [
           `Analysis complete. ${result.mafModificationsApplied || 0} MAF calibration cells updated.`,
+          dataSourceInfo,
           result.mafClampedModifications?.length
             ? `${result.mafClampedModifications.length} cells were limited to ±${result.changeLimitPercent}% change.`
             : null,
