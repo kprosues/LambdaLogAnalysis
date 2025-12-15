@@ -270,10 +270,10 @@ const IAMAnalysisTab = {
     if (!ctx) return;
 
     // Store original time range
-    if (!this.chartOriginalRanges.iam) {
+    if (times.length > 0) {
       this.chartOriginalRanges.iam = {
-        min: Math.min(...times),
-        max: Math.max(...times)
+        min: parseFloat(times[0]),
+        max: parseFloat(times[times.length - 1])
       };
     }
 
@@ -379,7 +379,7 @@ const IAMAnalysisTab = {
               },
               mode: 'x',
               onZoomComplete: (ctx) => {
-                synchronizeChartZoom('iam', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             },
             pan: {
@@ -387,7 +387,7 @@ const IAMAnalysisTab = {
               modifierKey: 'shift',
               mode: 'x',
               onPanComplete: (ctx) => {
-                synchronizeChartZoom('iam', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             }
           }

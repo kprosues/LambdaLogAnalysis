@@ -248,10 +248,10 @@ const LoadLimitTab = {
     if (!ctx) return;
 
     // Store original time range
-    if (!this.chartOriginalRanges.load) {
+    if (times.length > 0) {
       this.chartOriginalRanges.load = {
-        min: Math.min(...times),
-        max: Math.max(...times)
+        min: parseFloat(times[0]),
+        max: parseFloat(times[times.length - 1])
       };
     }
 
@@ -348,7 +348,7 @@ const LoadLimitTab = {
               },
               mode: 'x',
               onZoomComplete: (ctx) => {
-                synchronizeChartZoom('loadlimit', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             },
             pan: {
@@ -356,7 +356,7 @@ const LoadLimitTab = {
               modifierKey: 'shift',
               mode: 'x',
               onPanComplete: (ctx) => {
-                synchronizeChartZoom('loadlimit', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             }
           }

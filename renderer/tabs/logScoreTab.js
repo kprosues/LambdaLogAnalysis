@@ -108,8 +108,11 @@ const LogScoreTab = {
           const boostError = (event.boostError !== undefined && event.boostError !== null) ? event.boostError : 0;
           // Convert kPa to PSI (1 kPa = 0.1450377377 PSI)
           const kPaToPSI = (kpa) => kpa * 0.1450377377;
-          const boostTargetPSI = boostTarget > 0 ? kPaToPSI(boostTarget).toFixed(2) : 'N/A';
-          const actualBoostPSI = actualBoost > 0 ? kPaToPSI(actualBoost).toFixed(2) : 'N/A';
+          // Convert to gauge pressure (above atmosphere) for display
+          const ATMOSPHERIC_PSI = 14.696;
+          const kPaToGaugePSI = (kpa) => kPaToPSI(kpa) - ATMOSPHERIC_PSI;
+          const boostTargetPSIg = boostTarget > 0 ? kPaToGaugePSI(boostTarget).toFixed(2) : 'N/A';
+          const actualBoostPSIg = actualBoost > 0 ? kPaToGaugePSI(actualBoost).toFixed(2) : 'N/A';
           const boostErrorPSI = kPaToPSI(Math.abs(boostError));
           this.compiledIssues.push({
             time: event.time || 0,
@@ -119,7 +122,7 @@ const LogScoreTab = {
             severity: isOvershoot ? 'high' : 'low',
             value: boostErrorPSI,
             valueUnit: 'PSI',
-            description: `Boost ${errorText.toLowerCase()}: ${boostErrorPSI.toFixed(2)} PSI error (target: ${boostTargetPSI} PSI, actual: ${actualBoostPSI} PSI)`,
+            description: `Boost ${errorText.toLowerCase()}: ${boostErrorPSI.toFixed(2)} PSI error (target: ${boostTargetPSIg} PSIg, actual: ${actualBoostPSIg} PSIg)`,
             originalEvent: event
           });
         }

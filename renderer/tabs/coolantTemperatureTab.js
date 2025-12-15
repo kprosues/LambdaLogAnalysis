@@ -238,10 +238,10 @@ const CoolantTemperatureTab = {
     if (!ctx) return;
 
     // Store original time range
-    if (!this.chartOriginalRanges.coolantTemp) {
+    if (times.length > 0) {
       this.chartOriginalRanges.coolantTemp = {
-        min: Math.min(...times),
-        max: Math.max(...times)
+        min: parseFloat(times[0]),
+        max: parseFloat(times[times.length - 1])
       };
     }
 
@@ -319,7 +319,7 @@ const CoolantTemperatureTab = {
               },
               mode: 'x',
               onZoomComplete: (ctx) => {
-                synchronizeChartZoom('coolanttemp', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             },
             pan: {
@@ -327,7 +327,7 @@ const CoolantTemperatureTab = {
               modifierKey: 'shift',
               mode: 'x',
               onPanComplete: (ctx) => {
-                synchronizeChartZoom('coolanttemp', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             }
           }

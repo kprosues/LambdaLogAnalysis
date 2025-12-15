@@ -5,6 +5,17 @@ const BoostControlTab = {
     return kpa * 0.1450377377;
   },
 
+  // Atmospheric pressure constants
+  ATMOSPHERIC_PRESSURE_KPA: 101.325,
+  ATMOSPHERIC_PRESSURE_PSI: 14.696,
+
+  // Convert kPa absolute to PSI gauge (boost above atmosphere)
+  kPaToGaugePSI(kpa) {
+    // Gauge pressure = Absolute pressure - Atmospheric pressure
+    // Convert to PSI first, then subtract atmospheric PSI
+    return this.kPaToPSI(kpa) - this.ATMOSPHERIC_PRESSURE_PSI;
+  },
+
   elements: {
     maxOvershoot: null,
     inTargetPercent: null,
@@ -300,6 +311,7 @@ const BoostControlTab = {
     }
     
     if (this.elements.maxOvershoot) {
+      // Max overshoot is already a delta (error), so just convert to PSI directly
       this.elements.maxOvershoot.textContent = this.kPaToPSI(stats.maxOvershoot).toFixed(2) + ' PSI';
     }
     if (this.elements.inTargetPercent) {
@@ -436,8 +448,8 @@ const BoostControlTab = {
     const overshootEvents = events.filter(e => e.eventType === 'overshoot');
     const undershootEvents = events.filter(e => e.eventType === 'undershoot');
 
-    const overshootPoints = createEventPointArray(overshootEvents, e => this.kPaToPSI(e.actualBoost));
-    const undershootPoints = createEventPointArray(undershootEvents, e => this.kPaToPSI(e.actualBoost));
+    const overshootPoints = createEventPointArray(overshootEvents, e => this.kPaToGaugePSI(e.actualBoost));
+    const undershootPoints = createEventPointArray(undershootEvents, e => this.kPaToGaugePSI(e.actualBoost));
 
     // Chart configuration
     const chartOptions = {
@@ -518,7 +530,7 @@ const BoostControlTab = {
       const datasets = [
         {
           label: 'Boost Target',
-          data: boostTargets.map(v => this.kPaToPSI(v)),
+          data: boostTargets.map(v => this.kPaToGaugePSI(v)),
           borderColor: 'rgb(0, 123, 255)',
           backgroundColor: 'rgba(0, 123, 255, 0.1)',
           borderWidth: 2,
@@ -528,7 +540,7 @@ const BoostControlTab = {
         },
         {
           label: 'Actual Boost',
-          data: actualBoosts.map(v => this.kPaToPSI(v)),
+          data: actualBoosts.map(v => this.kPaToGaugePSI(v)),
           borderColor: 'rgb(40, 167, 69)',
           backgroundColor: 'rgba(40, 167, 69, 0.1)',
           borderWidth: 2,
@@ -593,7 +605,7 @@ const BoostControlTab = {
             position: 'left',
             title: {
               display: true,
-              text: 'Boost Pressure (PSI)'
+              text: 'Boost Pressure (PSI gauge)'
             }
           },
           ...(this.showThrottle ? {
@@ -922,8 +934,8 @@ const BoostControlTab = {
       
       row.innerHTML = `
         <td>${timeDisplay}</td>
-        <td>${this.kPaToPSI(event.boostTarget).toFixed(2)}</td>
-        <td>${this.kPaToPSI(event.actualBoost).toFixed(2)}</td>
+        <td>${this.kPaToGaugePSI(event.boostTarget).toFixed(2)}</td>
+        <td>${this.kPaToGaugePSI(event.actualBoost).toFixed(2)}</td>
         <td>${this.kPaToPSI(errorDisplay).toFixed(2)}</td>
         <td>${errorPercentDisplay}%</td>
         <td>${event.wastegateDC !== null ? event.wastegateDC.toFixed(1) : 'N/A'}</td>

@@ -251,10 +251,10 @@ const IntakeAirTemperatureTab = {
     if (!ctx) return;
 
     // Store original time range
-    if (!this.chartOriginalRanges.iat) {
+    if (times.length > 0) {
       this.chartOriginalRanges.iat = {
-        min: Math.min(...times),
-        max: Math.max(...times)
+        min: parseFloat(times[0]),
+        max: parseFloat(times[times.length - 1])
       };
     }
 
@@ -412,7 +412,7 @@ const IntakeAirTemperatureTab = {
               },
               mode: 'x',
               onZoomComplete: (ctx) => {
-                synchronizeChartZoom('iat', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             },
             pan: {
@@ -420,7 +420,7 @@ const IntakeAirTemperatureTab = {
               modifierKey: 'shift',
               mode: 'x',
               onPanComplete: (ctx) => {
-                synchronizeChartZoom('iat', ctx.chart);
+                synchronizeChartZoom(ctx.chart);
               }
             }
           }
