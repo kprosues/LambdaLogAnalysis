@@ -8,6 +8,8 @@ app.commandLine.appendSwitch('js-flags', '--optimize-for-size'); // Reduce memor
 
 let mainWindow;
 let splashWindow;
+let splashShownTime = 0;
+const MIN_SPLASH_TIME = 1500; // Minimum time to show splash (ms)
 
 function createSplashWindow() {
   // Set icon path based on platform
@@ -29,7 +31,8 @@ function createSplashWindow() {
     resizable: false,
     skipTaskbar: false,
     center: true,
-    backgroundColor: '#1a1a2e',
+    show: true, // Show immediately - don't wait for content
+    backgroundColor: '#1a1a2e', // Background shows while content loads
     icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
@@ -37,12 +40,11 @@ function createSplashWindow() {
     }
   });
 
+  // Track when splash was shown
+  splashShownTime = Date.now();
+
+  // Load splash content - background color already visible
   splashWindow.loadFile('renderer/splash.html');
-  
-  // Show splash immediately when it's ready (very fast since it's minimal HTML)
-  splashWindow.once('ready-to-show', () => {
-    splashWindow.show();
-  });
 }
 
 function createWindow() {
@@ -74,7 +76,11 @@ function createWindow() {
 
   // Show main window and close splash when content is ready
   mainWindow.once('ready-to-show', () => {
-    // Close splash window with a slight delay for smooth transition
+    // Ensure splash has been visible for minimum time
+    const elapsed = Date.now() - splashShownTime;
+    const remainingTime = Math.max(0, MIN_SPLASH_TIME - elapsed);
+    
+    // Close splash window after minimum display time
     if (splashWindow && !splashWindow.isDestroyed()) {
       setTimeout(() => {
         mainWindow.show();
@@ -82,11 +88,12 @@ function createWindow() {
           splashWindow.close();
           splashWindow = null;
         }
-      }, 300); // Small delay for smooth transition
+        console.log('Main window shown, splash closed');
+      }, remainingTime);
     } else {
       mainWindow.show();
+      console.log('Main window shown (no splash)');
     }
-    console.log('Window shown after ready-to-show');
   });
 
   mainWindow.setMenuBarVisibility(true);
@@ -179,13 +186,17 @@ app.whenReady().then(() => {
   // Show splash screen immediately
   createSplashWindow();
   
-  // Create main window (loads in background while splash is shown)
-  createWindow();
+  // Start loading main window after a brief moment to ensure splash is painted
+  setTimeout(() => {
+    createWindow();
+  }, 100);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createSplashWindow();
-      createWindow();
+      setTimeout(() => {
+        createWindow();
+      }, 100);
     }
   });
 });
@@ -200,6 +211,7 @@ app.on('window-all-closed', () => {
 ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Log File',
+    defaultPath: 'C:\\Users\\Keith\\Documents\\projectLAMBDA\\Datalogs',
     properties: ['openFile'],
     filters: [
       { name: 'CSV Files', extensions: ['csv'] },
@@ -233,6 +245,7 @@ ipcMain.handle('read-file', async (event, filePath) => {
 ipcMain.handle('open-tune-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Tune File',
+    defaultPath: 'G:\\My Drive\\1999_STi_stroker_tunes',
     properties: ['openFile'],
     filters: [
       { name: 'Tune Files', extensions: ['tune'] },
