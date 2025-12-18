@@ -1,97 +1,80 @@
 // DataProcessor class for parsing and processing ECU log CSV files
+// Optimized with chunk-based parsing and binary search
+
 class DataProcessor {
   constructor() {
     this.data = null;
     this.columns = [];
+    this._timeIndex = null; // Cached time values for binary search
+    this._cachedColumns = new Map(); // Cache for frequently accessed columns
   }
 
+  /**
+   * Parse CSV content with optimized chunk-based processing
+   * @param {string} csvContent - CSV content string
+   * @param {Function} progressCallback - Optional progress callback (0-100)
+   * @returns {Promise<Object>} - Parsed data result
+   */
   parseCSV(csvContent, progressCallback) {
     return new Promise((resolve, reject) => {
       console.log('parseCSV: Starting parse, content length:', csvContent.length);
+      
+      const config = window.Config ? window.Config.dataProcessing : {};
+      const chunkSize = config.chunkSize || 500;
       const totalSize = csvContent.length;
-      let lastProgressUpdate = 0;
       const accumulatedData = [];
-      
-      // If no progress callback, use simple parsing without step
-      if (!progressCallback) {
-        Papa.parse(csvContent, {
-          header: true,
-          skipEmptyLines: true,
-          dynamicTyping: true,
-          complete: (results) => {
-            this.processParseResults(results, [], resolve);
-          },
-          error: (error) => {
-            console.error('parseCSV: Parse error:', error);
-            reject(new Error(`CSV parsing failed: ${error.message}`));
+      let lastProgressUpdate = 0;
+      let processedBytes = 0;
+
+      // Throttle progress updates
+      const updateProgress = (percent) => {
+        if (progressCallback && (percent - lastProgressUpdate >= 1 || percent >= 100)) {
+          try {
+            progressCallback(Math.min(100, percent));
+            lastProgressUpdate = percent;
+          } catch (err) {
+            console.warn('Progress callback error:', err);
           }
-        });
-        return;
-      }
-      
-      // With progress callback, use step to track progress
+        }
+      };
+
       try {
         Papa.parse(csvContent, {
           header: true,
           skipEmptyLines: true,
           dynamicTyping: true,
-          step: (results, parser) => {
-            // Accumulate data
-            if (results.data) {
-              accumulatedData.push(results.data);
+          // Use chunk mode for better performance with progress
+          chunk: (results, parser) => {
+            // Accumulate chunk data
+            if (results.data && results.data.length > 0) {
+              accumulatedData.push(...results.data);
             }
-            
-            // Report progress more frequently - update every 50 rows or based on cursor
-            const shouldUpdate = accumulatedData.length % 50 === 0;
-            
-            if (results.meta && results.meta.cursor && totalSize > 0) {
-              try {
-                const currentProgress = Math.min(90, (results.meta.cursor / totalSize) * 100);
-                // Update if progress changed by at least 0.5% or every 50 rows
-                if (shouldUpdate || currentProgress - lastProgressUpdate >= 0.5) {
-                  progressCallback(currentProgress);
-                  lastProgressUpdate = currentProgress;
-                }
-              } catch (err) {
-                console.warn('Progress callback error:', err);
-              }
-            } else if (shouldUpdate && totalSize > 0) {
-              // Fallback: estimate progress based on row count if cursor not available
-              // Rough estimate: assume average row size
-              try {
-                const estimatedProgress = Math.min(90, (accumulatedData.length * 100) / (totalSize / 100));
-                if (estimatedProgress - lastProgressUpdate >= 1) {
-                  progressCallback(estimatedProgress);
-                  lastProgressUpdate = estimatedProgress;
-                }
-              } catch (err) {
-                console.warn('Progress callback error (fallback):', err);
-              }
-            }
+
+            // Calculate progress based on accumulated rows vs estimated total
+            // Estimate total rows: ~100 bytes per row average
+            const estimatedTotalRows = Math.max(totalSize / 100, accumulatedData.length);
+            const progress = Math.min(90, (accumulatedData.length / estimatedTotalRows) * 90);
+            updateProgress(progress);
           },
           complete: (results) => {
             console.log('parseCSV: Parse complete, accumulated rows:', accumulatedData.length);
-            // Ensure we show 100% when complete
-            if (progressCallback) {
-              try {
-                progressCallback(100);
-              } catch (err) {
-                console.warn('Progress callback error on complete:', err);
-              }
-            }
-            
-            // Create results object with accumulated data
+            updateProgress(95);
+
+            // Process results
             const finalResults = {
               ...results,
-              data: accumulatedData
+              data: accumulatedData,
+              meta: results.meta || {}
             };
-            
-            this.processParseResults(finalResults, accumulatedData, resolve);
+
+            this._processParseResults(finalResults, resolve, reject);
           },
           error: (error) => {
             console.error('parseCSV: Parse error:', error);
             reject(new Error(`CSV parsing failed: ${error.message}`));
-          }
+          },
+          // Chunk size configuration
+          chunkSize: chunkSize * 1024 // Convert to bytes (approximate)
         });
       } catch (error) {
         console.error('parseCSV: Exception during parse setup:', error);
@@ -100,130 +83,395 @@ class DataProcessor {
     });
   }
 
-  processParseResults(results, accumulatedData, resolve) {
-    if (results.errors && results.errors.length > 0) {
-      console.warn('CSV parsing warnings:', results.errors);
-    }
-    
-    // Use accumulated data if available (from step callback), otherwise use results.data
-    const rawData = accumulatedData.length > 0 ? accumulatedData : (results.data || []);
-    
-    this.data = rawData;
-    this.columns = results.meta.fields || [];
-    
-    // If columns array is empty but we have data, extract columns from first row
-    if (this.columns.length === 0 && this.data.length > 0 && this.data[0]) {
-      this.columns = Object.keys(this.data[0]);
-      console.log('Columns extracted from data row keys:', this.columns);
-    }
-    
-    // Debug: Log column names
-    console.log('CSV Columns detected:', this.columns);
-    console.log('Raw data rows:', this.data.length);
-    
-    // Clean and validate data
-    this.data = this.data.filter(row => {
-      // Ensure time column exists and is valid
-      return row && row['Time (s)'] !== null && row['Time (s)'] !== undefined && !isNaN(row['Time (s)']);
-    });
+  /**
+   * Process parsed results
+   * @private
+   */
+  _processParseResults(results, resolve, reject) {
+    try {
+      if (results.errors && results.errors.length > 0) {
+        console.warn('CSV parsing warnings:', results.errors);
+      }
 
-    console.log('Filtered data rows:', this.data.length);
+      const rawData = results.data || [];
+      this.columns = results.meta.fields || [];
 
-    // Convert numeric columns
-    this.data = this.data.map(row => {
-      const processedRow = { ...row };
+      // Extract columns from first row if needed
+      if (this.columns.length === 0 && rawData.length > 0 && rawData[0]) {
+        this.columns = Object.keys(rawData[0]);
+        console.log('Columns extracted from data row keys:', this.columns);
+      }
+
+      console.log('CSV Columns detected:', this.columns);
+      console.log('Raw data rows:', rawData.length);
+
+      // Find time column
+      const timeColumn = this._findTimeColumn();
       
-      // Process numeric columns
-      const numericColumns = [
-        'Time (s)',
-        'Airflow (MAF) (g/s)',
-        'Load (MAF) (g/rev)',
-        'Manifold Air Pressure - Filtered (kPa)',
-        'Mass Air Flow (g/s)',
-        'Boost Target (kPa)',
-        'Wastegate Duty Cycle (%)',
-        'Air/Fuel Sensor #1 (λ)',
-        'Injector Pulse Width (ms)',
-        'Fuel - Base Multiplier',
-        'Power Mode - Fuel Ratio Target (λ)',
-        'Fuel Trim - Long Term (%)',
-        'Fuel Trim - Short Term (%)',
-        'Coolant Temperature (°C)',
-        'Intake Air Temperature (°C)',
-        'Manifold Absolute Pressure (kPa)',
-        'Engine Speed (rpm)',
-        'Vehicle Speed (km/h)',
-        'System Voltage (V)',
-        'Ignition Advance (°)',
-        'Ignition Advance - Base (°BTDC)',
-        'Ignition Advance Multiplier',
-        'Ignition Advance - Fine Learn (°)',
-        'Knock Retard (°)',
-        'Throttle Position (%)',
-        'Mass Air Flow Voltage (V)',
-        'Fuel - Acceleration Enrich'
-      ];
-
-      numericColumns.forEach(col => {
-        if (processedRow[col] !== undefined && processedRow[col] !== null) {
-          const num = parseFloat(processedRow[col]);
-          processedRow[col] = isNaN(num) ? 0 : num;
-        } else {
-          processedRow[col] = 0;
+      // Filter and process data in a single pass
+      this.data = [];
+      this._timeIndex = [];
+      
+      for (let i = 0; i < rawData.length; i++) {
+        const row = rawData[i];
+        if (!row) continue;
+        
+        const timeValue = row[timeColumn];
+        if (timeValue === null || timeValue === undefined || isNaN(timeValue)) {
+          continue;
         }
+        
+        // Process numeric columns (dynamicTyping should handle most of this)
+        const processedRow = this._processRow(row);
+        
+        this.data.push(processedRow);
+        this._timeIndex.push(timeValue);
+      }
+
+      console.log('Filtered data rows:', this.data.length);
+
+      // Clear caches
+      this._cachedColumns.clear();
+
+      // Notify ColumnMapper if available
+      if (window.ColumnMapper) {
+        window.ColumnMapper.initialize(this.columns);
+      }
+
+      resolve({
+        data: this.data,
+        columns: this.columns,
+        rowCount: this.data.length
       });
-
-      return processedRow;
-    });
-
-    console.log('parseCSV: Data processed, resolving promise');
-    resolve({
-      data: this.data,
-      columns: this.columns,
-      rowCount: this.data.length
-    });
+    } catch (error) {
+      console.error('Error processing parse results:', error);
+      reject(error);
+    }
   }
 
+  /**
+   * Find the time column name
+   * @private
+   */
+  _findTimeColumn() {
+    const possibleNames = ['Time (s)', 'Time', 'Time(s)', 'Timestamp', 'time'];
+    for (const name of possibleNames) {
+      if (this.columns.includes(name)) {
+        return name;
+      }
+    }
+    // Case-insensitive search
+    const found = this.columns.find(col => col.toLowerCase().includes('time'));
+    return found || 'Time (s)';
+  }
+
+  /**
+   * Process a single row, ensuring numeric columns are numbers
+   * @private
+   */
+  _processRow(row) {
+    // With dynamicTyping enabled, most values should already be numbers
+    // Just handle any edge cases
+    const processedRow = { ...row };
+    
+    // List of columns that must be numeric
+    const numericColumns = [
+      'Time (s)',
+      'Airflow (MAF) (g/s)',
+      'Load (MAF) (g/rev)',
+      'Manifold Air Pressure - Filtered (kPa)',
+      'Mass Air Flow (g/s)',
+      'Boost Target (kPa)',
+      'Wastegate Duty Cycle (%)',
+      'Air/Fuel Sensor #1 (λ)',
+      'Injector Pulse Width (ms)',
+      'Fuel - Base Multiplier',
+      'Power Mode - Fuel Ratio Target (λ)',
+      'Fuel Trim - Long Term (%)',
+      'Fuel Trim - Short Term (%)',
+      'Coolant Temperature (°C)',
+      'Intake Air Temperature (°C)',
+      'Manifold Absolute Pressure (kPa)',
+      'Engine Speed (rpm)',
+      'Vehicle Speed (km/h)',
+      'System Voltage (V)',
+      'Ignition Advance (°)',
+      'Ignition Advance - Base (°BTDC)',
+      'Ignition Advance Multiplier',
+      'Ignition Advance - Fine Learn (°)',
+      'Knock Retard (°)',
+      'Throttle Position (%)',
+      'Mass Air Flow Voltage (V)',
+      'Fuel - Acceleration Enrich'
+    ];
+
+    // Only convert if value exists and isn't already a number
+    for (const col of numericColumns) {
+      const val = processedRow[col];
+      if (val !== undefined && val !== null && typeof val !== 'number') {
+        const num = parseFloat(val);
+        processedRow[col] = isNaN(num) ? 0 : num;
+      } else if (val === undefined || val === null) {
+        processedRow[col] = 0;
+      }
+    }
+
+    return processedRow;
+  }
+
+  /**
+   * Get column index
+   * @param {string} columnName - Column name
+   * @returns {number} - Index or -1
+   */
   getColumnIndex(columnName) {
     return this.columns.indexOf(columnName);
   }
 
+  /**
+   * Get all data
+   * @returns {Object[]} - Data array
+   */
   getData() {
     return this.data;
   }
 
+  /**
+   * Get all column names
+   * @returns {string[]} - Column names
+   */
   getColumns() {
     return this.columns;
   }
 
+  /**
+   * Get time range
+   * @returns {Object} - { min, max }
+   */
   getTimeRange() {
-    if (!this.data || this.data.length === 0) {
+    if (!this._timeIndex || this._timeIndex.length === 0) {
       return { min: 0, max: 0 };
     }
-    
-    const times = this.data.map(row => row['Time (s)']).filter(t => !isNaN(t));
     return {
-      min: Math.min(...times),
-      max: Math.max(...times)
+      min: this._timeIndex[0],
+      max: this._timeIndex[this._timeIndex.length - 1]
     };
   }
 
+  /**
+   * Get value at specific time using binary search (O(log n))
+   * @param {number} time - Target time
+   * @param {string} columnName - Column name
+   * @returns {*} - Value at closest time or null
+   */
   getValueAtTime(time, columnName) {
-    if (!this.data) return null;
-    
-    // Find closest time match
-    let closest = null;
-    let minDiff = Infinity;
-    
-    for (const row of this.data) {
-      const diff = Math.abs(row['Time (s)'] - time);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closest = row;
+    if (!this.data || !this._timeIndex || this._timeIndex.length === 0) {
+      return null;
+    }
+
+    const index = this._binarySearchTime(time);
+    if (index < 0 || index >= this.data.length) {
+      return null;
+    }
+
+    return this.data[index][columnName];
+  }
+
+  /**
+   * Get row at specific time using binary search
+   * @param {number} time - Target time
+   * @returns {Object|null} - Row data or null
+   */
+  getRowAtTime(time) {
+    if (!this.data || !this._timeIndex || this._timeIndex.length === 0) {
+      return null;
+    }
+
+    const index = this._binarySearchTime(time);
+    if (index < 0 || index >= this.data.length) {
+      return null;
+    }
+
+    return this.data[index];
+  }
+
+  /**
+   * Binary search for closest time index
+   * @param {number} targetTime - Target time
+   * @returns {number} - Index of closest time
+   * @private
+   */
+  _binarySearchTime(targetTime) {
+    const times = this._timeIndex;
+    if (!times || times.length === 0) return -1;
+
+    let left = 0;
+    let right = times.length - 1;
+
+    // Handle edge cases
+    if (targetTime <= times[left]) return left;
+    if (targetTime >= times[right]) return right;
+
+    // Binary search
+    while (left < right - 1) {
+      const mid = Math.floor((left + right) / 2);
+      const midTime = times[mid];
+
+      if (midTime === targetTime) {
+        return mid;
+      } else if (midTime < targetTime) {
+        left = mid;
+      } else {
+        right = mid;
       }
     }
-    
-    return closest ? closest[columnName] : null;
+
+    // Return closest between left and right
+    const diffLeft = Math.abs(times[left] - targetTime);
+    const diffRight = Math.abs(times[right] - targetTime);
+    return diffLeft <= diffRight ? left : right;
+  }
+
+  /**
+   * Get data rows in time range using binary search
+   * @param {number} startTime - Start time
+   * @param {number} endTime - End time
+   * @returns {Object[]} - Array of rows in range
+   */
+  getDataInTimeRange(startTime, endTime) {
+    if (!this.data || !this._timeIndex || this._timeIndex.length === 0) {
+      return [];
+    }
+
+    const startIdx = this._binarySearchTimeStart(startTime);
+    const endIdx = this._binarySearchTimeEnd(endTime);
+
+    if (startIdx < 0 || startIdx > endIdx) {
+      return [];
+    }
+
+    return this.data.slice(startIdx, endIdx + 1);
+  }
+
+  /**
+   * Binary search for start of time range
+   * @private
+   */
+  _binarySearchTimeStart(targetTime) {
+    const times = this._timeIndex;
+    if (!times || times.length === 0) return -1;
+
+    let left = 0;
+    let right = times.length - 1;
+
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      if (times[mid] < targetTime) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+
+    return left;
+  }
+
+  /**
+   * Binary search for end of time range
+   * @private
+   */
+  _binarySearchTimeEnd(targetTime) {
+    const times = this._timeIndex;
+    if (!times || times.length === 0) return -1;
+
+    let left = 0;
+    let right = times.length - 1;
+
+    while (left < right) {
+      const mid = Math.floor((left + right + 1) / 2);
+      if (times[mid] > targetTime) {
+        right = mid - 1;
+      } else {
+        left = mid;
+      }
+    }
+
+    return left;
+  }
+
+  /**
+   * Get cached column array or compute it
+   * @param {string} columnName - Column name
+   * @returns {number[]} - Array of values
+   */
+  getColumnArray(columnName) {
+    // Check cache
+    if (this._cachedColumns.has(columnName)) {
+      return this._cachedColumns.get(columnName);
+    }
+
+    if (!this.data || !columnName) {
+      return [];
+    }
+
+    // Extract column values
+    const values = this.data.map(row => {
+      const val = row[columnName];
+      if (typeof val === 'number') return val;
+      const num = parseFloat(val);
+      return isNaN(num) ? 0 : num;
+    });
+
+    // Cache the result
+    this._cachedColumns.set(columnName, values);
+    return values;
+  }
+
+  /**
+   * Get time array (frequently used, always cached)
+   * @returns {number[]} - Array of time values
+   */
+  getTimeArray() {
+    return this._timeIndex ? [...this._timeIndex] : [];
+  }
+
+  /**
+   * Clear cached column arrays
+   */
+  clearCache() {
+    this._cachedColumns.clear();
+  }
+
+  /**
+   * Get data statistics for a column
+   * @param {string} columnName - Column name
+   * @returns {Object} - { min, max, avg, count }
+   */
+  getColumnStats(columnName) {
+    const values = this.getColumnArray(columnName);
+    if (values.length === 0) {
+      return { min: 0, max: 0, avg: 0, count: 0 };
+    }
+
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+    let count = 0;
+
+    for (const val of values) {
+      if (isFinite(val)) {
+        if (val < min) min = val;
+        if (val > max) max = val;
+        sum += val;
+        count++;
+      }
+    }
+
+    return {
+      min: count > 0 ? min : 0,
+      max: count > 0 ? max : 0,
+      avg: count > 0 ? sum / count : 0,
+      count
+    };
   }
 }
-

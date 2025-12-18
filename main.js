@@ -207,11 +207,17 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Get user's documents folder dynamically
+function getDefaultLogPath() {
+  const documentsPath = app.getPath('documents');
+  return documentsPath;
+}
+
 // Handle file dialog
 ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Log File',
-    defaultPath: 'C:\\Users\\Keith\\Documents\\projectLAMBDA\\Datalogs',
+    defaultPath: getDefaultLogPath(),
     properties: ['openFile'],
     filters: [
       { name: 'CSV Files', extensions: ['csv'] },
@@ -245,7 +251,7 @@ ipcMain.handle('read-file', async (event, filePath) => {
 ipcMain.handle('open-tune-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Tune File',
-    defaultPath: 'G:\\My Drive\\1999_STi_stroker_tunes',
+    defaultPath: getDefaultLogPath(),
     properties: ['openFile'],
     filters: [
       { name: 'Tune Files', extensions: ['tune'] },

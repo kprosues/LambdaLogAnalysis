@@ -1207,6 +1207,16 @@
       }
     }
   </script>
+  
+  <!-- Shared utilities and configuration (must load before analyzers) -->
+  <script src="config.js"></script>
+  <script src="AnalyzerUtils.js"></script>
+  <script src="ChartUtils.js"></script>
+  <script src="ColumnMapper.js"></script>
+  <script src="AppState.js"></script>
+  <script src="BaseTabModule.js"></script>
+  
+  <!-- Analysis modules -->
   <script src="../analysis/tuneFileParser.js"></script>
   <script src="../analysis/dataProcessor.js"></script>
   <script src="../analysis/knockDetector.js"></script>

@@ -1,64 +1,81 @@
 // Analysis modules are loaded via script tags in index.html
+// Note: AppState.js now manages global state (dataProcessor, smoothingConfig, etc.)
+// These variables are kept for backward compatibility
 let dataProcessor = null;
 let tabManager = null;
 
 // Make dataProcessor globally accessible for tab modules
+// (Now managed by AppState.js with backward-compatible window properties)
 window.dataProcessor = null;
 
 // Global time range state for cross-tab chart synchronization
-window.globalTimeRange = {
-  min: null,
-  max: null,
-  originalMin: null,
-  originalMax: null,
-  isZoomed: false
-};
+// (Now managed by AppState.js with backward-compatible window properties)
+if (!window.globalTimeRange) {
+  window.globalTimeRange = {
+    min: null,
+    max: null,
+    originalMin: null,
+    originalMax: null,
+    isZoomed: false
+  };
+}
 
 // Shared smoothing state and utility
-window.smoothingConfig = {
-  enabled: true, // Enabled by default when log file is loaded
-  windowSize: 5 // Moving average window size
-};
+// (Now managed by AppState.js with backward-compatible window properties)
+if (!window.smoothingConfig) {
+  window.smoothingConfig = {
+    enabled: true, // Enabled by default when log file is loaded
+    windowSize: 5 // Moving average window size
+  };
+}
 
 // Shared smoothing utility function
-window.applyDataSmoothing = function(dataArray, windowSize, enabled) {
-  if (!enabled || windowSize <= 1) {
-    return dataArray;
-  }
-  
-  const smoothed = new Array(dataArray.length);
-  const halfWindow = Math.floor(windowSize / 2);
-  
-  for (let i = 0; i < dataArray.length; i++) {
-    const value = dataArray[i];
-    
-    // Preserve NaN values (gaps) without smoothing
-    if (isNaN(value)) {
-      smoothed[i] = NaN;
-      continue;
+// (Now provided by AnalyzerUtils.applySmoothing, this is kept for backward compatibility)
+if (!window.applyDataSmoothing) {
+  window.applyDataSmoothing = function(dataArray, windowSize, enabled) {
+    // Use AnalyzerUtils if available
+    if (window.AnalyzerUtils && window.AnalyzerUtils.applySmoothing) {
+      return window.AnalyzerUtils.applySmoothing(dataArray, windowSize, enabled);
     }
     
-    // Calculate moving average
-    let sum = 0;
-    let count = 0;
-    const start = Math.max(0, i - halfWindow);
-    const end = Math.min(dataArray.length - 1, i + halfWindow);
+    if (!enabled || windowSize <= 1) {
+      return dataArray;
+    }
     
-    for (let j = start; j <= end; j++) {
-      const val = dataArray[j];
-      // Only include valid numbers (not NaN) in the average
-      if (!isNaN(val) && typeof val === 'number') {
-        sum += val;
-        count++;
+    const smoothed = new Array(dataArray.length);
+    const halfWindow = Math.floor(windowSize / 2);
+    
+    for (let i = 0; i < dataArray.length; i++) {
+      const value = dataArray[i];
+      
+      // Preserve NaN values (gaps) without smoothing
+      if (isNaN(value)) {
+        smoothed[i] = NaN;
+        continue;
       }
+      
+      // Calculate moving average
+      let sum = 0;
+      let count = 0;
+      const start = Math.max(0, i - halfWindow);
+      const end = Math.min(dataArray.length - 1, i + halfWindow);
+      
+      for (let j = start; j <= end; j++) {
+        const val = dataArray[j];
+        // Only include valid numbers (not NaN) in the average
+        if (!isNaN(val) && typeof val === 'number') {
+          sum += val;
+          count++;
+        }
+      }
+      
+      // Use original value if no valid neighbors found
+      smoothed[i] = count > 0 ? sum / count : value;
     }
     
-    // Use original value if no valid neighbors found
-    smoothed[i] = count > 0 ? sum / count : value;
-  }
-  
-  return smoothed;
-};
+    return smoothed;
+  };
+}
 
 // DOM Elements
 const openFileBtn = document.getElementById('openFileBtn');
@@ -776,230 +793,79 @@ async function processFile(content, filePath) {
     // Clear tab cache
     tabManager.clearCache();
     
-    // Update analyzers with data processor
-    const knockDetector = tabManager.getTabAnalyzer('knock');
-    const boostAnalyzer = tabManager.getTabAnalyzer('boost');
-    const afrAnalyzer = tabManager.getTabAnalyzer('fueling');
-    const fuelTrimAnalyzer = tabManager.getTabAnalyzer('fueltrim');
-    const longTermFuelTrimAnalyzer = tabManager.longTermFuelTrimAnalyzer;
-    const iamAnalyzer = tabManager.getTabAnalyzer('iam');
-    const loadLimitAnalyzer = tabManager.getTabAnalyzer('loadlimit');
-    const coolantTemperatureAnalyzer = tabManager.getTabAnalyzer('coolanttemp');
-    const intakeAirTemperatureAnalyzer = tabManager.getTabAnalyzer('iat');
+    // Collect all analyzers
+    const analyzers = {
+      knock: tabManager.getTabAnalyzer('knock'),
+      boost: tabManager.getTabAnalyzer('boost'),
+      fueling: tabManager.getTabAnalyzer('fueling'),
+      fueltrim: tabManager.getTabAnalyzer('fueltrim'),
+      longtermfueltrim: tabManager.longTermFuelTrimAnalyzer,
+      iam: tabManager.getTabAnalyzer('iam'),
+      loadlimit: tabManager.getTabAnalyzer('loadlimit'),
+      coolanttemp: tabManager.getTabAnalyzer('coolanttemp'),
+      iat: tabManager.getTabAnalyzer('iat')
+    };
     
     console.log('Setting dataProcessor on analyzers...');
-    console.log('dataProcessor:', dataProcessor);
-    console.log('dataProcessor columns:', dataProcessor ? dataProcessor.getColumns() : 'N/A');
     
-    if (knockDetector) {
-      knockDetector.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on knockDetector');
-    }
-    if (boostAnalyzer) {
-      boostAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on boostAnalyzer');
-      console.log('boostAnalyzer.dataProcessor:', boostAnalyzer.dataProcessor);
-      console.log('boostAnalyzer.dataProcessor columns:', boostAnalyzer.dataProcessor ? boostAnalyzer.dataProcessor.getColumns() : 'N/A');
-    }
-    if (afrAnalyzer) {
-      afrAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on afrAnalyzer');
-    }
-    if (fuelTrimAnalyzer) {
-      fuelTrimAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on fuelTrimAnalyzer');
-    }
-    if (longTermFuelTrimAnalyzer) {
-      longTermFuelTrimAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on longTermFuelTrimAnalyzer');
-    }
-    if (iamAnalyzer) {
-      iamAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on iamAnalyzer');
-    }
-    if (loadLimitAnalyzer) {
-      loadLimitAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on loadLimitAnalyzer');
-    }
-    if (coolantTemperatureAnalyzer) {
-      coolantTemperatureAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on coolantTemperatureAnalyzer');
-    }
-    if (intakeAirTemperatureAnalyzer) {
-      intakeAirTemperatureAnalyzer.dataProcessor = dataProcessor;
-      console.log('✓ Set dataProcessor on intakeAirTemperatureAnalyzer');
-    }
+    // Set dataProcessor on all analyzers
+    Object.entries(analyzers).forEach(([name, analyzer]) => {
+      if (analyzer) {
+        analyzer.dataProcessor = dataProcessor;
+        console.log(`✓ Set dataProcessor on ${name}`);
+      }
+    });
     
     // Make knockDetector globally accessible for IAM correlation
-    window.knockDetector = knockDetector;
+    window.knockDetector = analyzers.knock;
     
-    // Run knock analysis
+    // Run knock analysis first (required for IAM correlation)
     updateProgress(50, 'Detecting knock events...');
-    if (knockDetector) {
-      const knockEvents = knockDetector.detectKnockEvents();
+    if (analyzers.knock) {
+      const knockEvents = analyzers.knock.detectKnockEvents();
       console.log('Detected knock events:', knockEvents.length);
       tabManager.cache.set('knock', { events: knockEvents });
     }
     
-    // Run boost control analysis
-    updateProgress(60, 'Analyzing boost control...');
-    if (boostAnalyzer) {
-      const boostAnalysis = boostAnalyzer.analyze();
-      console.log('Boost analysis complete:', boostAnalysis ? 'success' : 'failed');
-      if (boostAnalysis) {
-        console.log('Boost analysis results:', {
-          events: boostAnalysis.events?.length || 0,
-          hasStats: !!boostAnalysis.statistics,
-          hasColumns: !!boostAnalysis.columns,
-          error: boostAnalysis.error
-        });
-        tabManager.cache.set('boost', boostAnalysis);
-      } else {
-        console.error('Boost analysis returned null');
-      }
-    } else {
-      console.error('Boost analyzer not available');
-    }
+    // Run remaining analyses in PARALLEL for performance
+    updateProgress(55, 'Running parallel analysis...');
     
-    // Run AFR analysis
-    updateProgress(65, 'Analyzing air/fuel ratio...');
-    if (afrAnalyzer) {
-      const afrAnalysis = afrAnalyzer.analyze();
-      console.log('AFR analysis complete:', afrAnalysis ? 'success' : 'failed');
-      if (afrAnalysis) {
-        console.log('AFR analysis results:', {
-          events: afrAnalysis.events?.length || 0,
-          hasStats: !!afrAnalysis.statistics,
-          hasColumns: !!afrAnalysis.columns,
-          error: afrAnalysis.error
-        });
-        tabManager.cache.set('fueling', afrAnalysis);
-      } else {
-        console.error('AFR analysis returned null');
+    const runAnalysis = async (name, analyzer, cacheKey) => {
+      if (!analyzer) {
+        console.warn(`${name} analyzer not available`);
+        return null;
       }
-    } else {
-      console.error('AFR analyzer not available');
-    }
+      
+      try {
+        const result = analyzer.analyze ? analyzer.analyze() : null;
+        if (result) {
+          console.log(`${name} analysis complete:`, {
+            events: result.events?.length || 0,
+            hasStats: !!result.statistics
+          });
+          tabManager.cache.set(cacheKey, result);
+        }
+        return result;
+      } catch (error) {
+        console.error(`${name} analysis error:`, error);
+        return null;
+      }
+    };
     
-    // Run fuel trim analysis
-    updateProgress(67, 'Analyzing short term fuel trim...');
-    if (fuelTrimAnalyzer) {
-      const fuelTrimAnalysis = fuelTrimAnalyzer.analyze();
-      console.log('Fuel trim analysis complete:', fuelTrimAnalysis ? 'success' : 'failed');
-      if (fuelTrimAnalysis) {
-        console.log('Fuel trim analysis results:', {
-          events: fuelTrimAnalysis.events?.length || 0,
-          hasStats: !!fuelTrimAnalysis.statistics,
-          hasColumns: !!fuelTrimAnalysis.columns,
-          error: fuelTrimAnalysis.error
-        });
-        tabManager.cache.set('fueltrim', fuelTrimAnalysis);
-      } else {
-        console.error('Fuel trim analysis returned null');
-      }
-    } else {
-      console.error('Fuel trim analyzer not available');
-    }
+    // Run all analyses in parallel using Promise.all
+    const analysisPromises = [
+      runAnalysis('Boost', analyzers.boost, 'boost'),
+      runAnalysis('AFR', analyzers.fueling, 'fueling'),
+      runAnalysis('Fuel Trim', analyzers.fueltrim, 'fueltrim'),
+      runAnalysis('Long Term Fuel Trim', analyzers.longtermfueltrim, 'longtermfueltrim'),
+      runAnalysis('IAM', analyzers.iam, 'iam'),
+      runAnalysis('Load Limit', analyzers.loadlimit, 'loadlimit'),
+      runAnalysis('Coolant Temp', analyzers.coolanttemp, 'coolanttemp'),
+      runAnalysis('IAT', analyzers.iat, 'iat')
+    ];
     
-    // Run long term fuel trim analysis
-    updateProgress(68, 'Analyzing long term fuel trim...');
-    if (longTermFuelTrimAnalyzer) {
-      const longTermFuelTrimAnalysis = longTermFuelTrimAnalyzer.analyze();
-      console.log('Long term fuel trim analysis complete:', longTermFuelTrimAnalysis ? 'success' : 'failed');
-      if (longTermFuelTrimAnalysis) {
-        console.log('Long term fuel trim analysis results:', {
-          events: longTermFuelTrimAnalysis.events?.length || 0,
-          hasStats: !!longTermFuelTrimAnalysis.statistics,
-          hasColumns: !!longTermFuelTrimAnalysis.columns,
-          error: longTermFuelTrimAnalysis.error
-        });
-        tabManager.cache.set('longtermfueltrim', longTermFuelTrimAnalysis);
-      } else {
-        console.error('Long term fuel trim analysis returned null');
-      }
-    } else {
-      console.error('Long term fuel trim analyzer not available');
-    }
-    
-    // Run IAM analysis
-    updateProgress(70, 'Analyzing IAM...');
-    if (iamAnalyzer) {
-      const iamAnalysis = iamAnalyzer.analyze();
-      console.log('IAM analysis complete:', iamAnalysis ? 'success' : 'failed');
-      if (iamAnalysis) {
-        console.log('IAM analysis results:', {
-          events: iamAnalysis.events?.length || 0,
-          hasStats: !!iamAnalysis.statistics,
-          hasColumns: !!iamAnalysis.columns,
-          error: iamAnalysis.error
-        });
-        tabManager.cache.set('iam', iamAnalysis);
-      } else {
-        console.error('IAM analysis returned null');
-      }
-    } else {
-      console.error('IAM analyzer not available');
-    }
-    
-    // Run load limit analysis
-    updateProgress(72, 'Analyzing load limits...');
-    if (loadLimitAnalyzer) {
-      const loadLimitAnalysis = loadLimitAnalyzer.analyze();
-      console.log('Load limit analysis complete:', loadLimitAnalysis ? 'success' : 'failed');
-      if (loadLimitAnalysis) {
-        console.log('Load limit analysis results:', {
-          events: loadLimitAnalysis.events?.length || 0,
-          hasStats: !!loadLimitAnalysis.statistics,
-          hasColumns: !!loadLimitAnalysis.columns,
-          error: loadLimitAnalysis.error
-        });
-        tabManager.cache.set('loadlimit', loadLimitAnalysis);
-      } else {
-        console.error('Load limit analysis returned null');
-      }
-    } else {
-      console.error('Load limit analyzer not available');
-    }
-    
-    // Run coolant temperature analysis
-    updateProgress(74, 'Analyzing coolant temperature...');
-    if (coolantTemperatureAnalyzer) {
-      const coolantTempAnalysis = coolantTemperatureAnalyzer.analyze();
-      console.log('Coolant temperature analysis complete:', coolantTempAnalysis ? 'success' : 'failed');
-      if (coolantTempAnalysis) {
-        console.log('Coolant temperature analysis results:', {
-          events: coolantTempAnalysis.events?.length || 0,
-          hasStats: !!coolantTempAnalysis.statistics,
-          hasColumns: !!coolantTempAnalysis.columns,
-          error: coolantTempAnalysis.error
-        });
-        tabManager.cache.set('coolanttemp', coolantTempAnalysis);
-      } else {
-        console.error('Coolant temperature analysis returned null');
-      }
-    } else {
-      console.error('Coolant temperature analyzer not available');
-    }
-    
-    // Run intake air temperature analysis
-    updateProgress(74, 'Analyzing intake air temperature...');
-    if (intakeAirTemperatureAnalyzer) {
-      const iatAnalysis = intakeAirTemperatureAnalyzer.analyze();
-      console.log('Intake air temperature analysis complete:', iatAnalysis ? 'success' : 'failed');
-      if (iatAnalysis) {
-        console.log('Intake air temperature analysis results:', {
-          events: iatAnalysis.events?.length || 0,
-          hasStats: !!iatAnalysis.statistics,
-          hasColumns: !!iatAnalysis.columns,
-          error: iatAnalysis.error
-        });
-        tabManager.cache.set('iat', iatAnalysis);
-      } else {
-        console.error('Intake air temperature analysis returned null');
-      }
-    } else {
-      console.error('Intake air temperature analyzer not available');
-    }
+    // Wait for all analyses to complete
+    await Promise.all(analysisPromises);
     
     updateProgress(75, 'Analysis complete');
     
